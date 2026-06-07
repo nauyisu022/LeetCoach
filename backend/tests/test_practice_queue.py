@@ -50,7 +50,7 @@ def _insert_codetop(conn, question_id: int, title: str, slug: str, frequency: in
 
 def test_practice_queue_prioritizes_review_inside_selected_topic(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
-    monkeypatch.setenv("LEETCOACH_DB_PATH", str(db_path))
+    monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
     conn = get_connection(db_path)
     init_db(conn)
     with conn:
@@ -90,7 +90,7 @@ def test_practice_queue_prioritizes_review_inside_selected_topic(tmp_path, monke
 
 def test_practice_next_uses_current_problem_topics_and_excludes_current(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
-    monkeypatch.setenv("LEETCOACH_DB_PATH", str(db_path))
+    monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
     conn = get_connection(db_path)
     init_db(conn)
     with conn:
@@ -115,7 +115,7 @@ def test_practice_next_uses_current_problem_topics_and_excludes_current(tmp_path
 
 def test_practice_insights_rank_weak_topics(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
-    monkeypatch.setenv("LEETCOACH_DB_PATH", str(db_path))
+    monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
     conn = get_connection(db_path)
     init_db(conn)
     with conn:

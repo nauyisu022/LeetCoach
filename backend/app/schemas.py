@@ -19,6 +19,14 @@ class ProblemSummary(BaseModel):
     codetop_last_asked_at: str | None = None
 
 
+class ProgressSummary(BaseModel):
+    total: int
+    passed: int
+    needs_review: int
+    unseen: int
+    today_passed: int
+
+
 class PracticeQueueItem(ProblemSummary):
     recommendation_reason: str
 
@@ -181,6 +189,7 @@ class SubmissionResponse(BaseModel):
     stdout: str | None
     return_output: str | None = None
     runtime_ms: int
+    execution_ms: int | None = None
     test_count_estimate: int
     passed_test_count: int
 
@@ -192,6 +201,7 @@ class SubmissionHistoryItem(BaseModel):
     passed: bool
     failed_assertion: str | None
     runtime_ms: int
+    execution_ms: int | None = None
     test_count_estimate: int
     passed_test_count: int
     created_at: str

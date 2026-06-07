@@ -29,7 +29,7 @@ def _insert_problem(conn, task_id: str, question_id: int, tags: str) -> None:
 
 def test_problem_tags_endpoint_and_multi_tag_filter(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
-    monkeypatch.setenv("LEETCOACH_DB_PATH", str(db_path))
+    monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
     conn = get_connection(db_path)
     init_db(conn)
     with conn:

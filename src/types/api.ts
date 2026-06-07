@@ -12,6 +12,14 @@ export type ProblemSummary = {
   codetop_last_asked_at: string | null;
 };
 
+export type ProgressSummary = {
+  total: number;
+  passed: number;
+  needs_review: number;
+  unseen: number;
+  today_passed: number;
+};
+
 export type PracticeQueueItem = ProblemSummary & {
   recommendation_reason: string;
 };
@@ -144,6 +152,7 @@ export type SubmissionResponse = {
   stdout: string | null;
   return_output: string | null;
   runtime_ms: number;
+  execution_ms: number | null;
   test_count_estimate: number;
   passed_test_count: number;
 };
@@ -155,6 +164,7 @@ export type SubmissionHistoryItem = {
   passed: boolean;
   failed_assertion: string | null;
   runtime_ms: number;
+  execution_ms: number | null;
   test_count_estimate: number;
   passed_test_count: number;
   created_at: string;

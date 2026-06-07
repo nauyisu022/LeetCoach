@@ -5,12 +5,44 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 DATA_DIR = ROOT_DIR / "data"
-DEFAULT_DB_PATH = DATA_DIR / "app.db"
-DEFAULT_DATASET_PATH = Path("/Users/admin/Downloads/leetcode-dataset-check/LeetCodeDataset")
+DEFAULT_LEGACY_DB_PATH = DATA_DIR / "app.legacy.db"
+DEFAULT_CATALOG_DB_PATH = DATA_DIR / "catalog.db"
+DEFAULT_USER_DB_PATH = DATA_DIR / "user.local.db"
+DEFAULT_DATASET_PATH = DATA_DIR / "LeetCodeDataset"
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip("'\"")
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+_load_env_file(ROOT_DIR / ".env")
+_load_env_file(ROOT_DIR / ".env.local")
 
 
 def db_path() -> Path:
-    return Path(os.getenv("LEETCOACH_DB_PATH", str(DEFAULT_DB_PATH)))
+    return catalog_db_path()
+
+
+def catalog_db_path() -> Path:
+    return Path(os.getenv("LEETCOACH_CATALOG_DB_PATH", str(DEFAULT_CATALOG_DB_PATH)))
+
+
+def user_db_path() -> Path:
+    return Path(os.getenv("LEETCOACH_USER_DB_PATH", str(DEFAULT_USER_DB_PATH)))
+
+
+def legacy_db_path() -> Path:
+    return Path(os.getenv("LEETCOACH_LEGACY_DB_PATH", str(DEFAULT_LEGACY_DB_PATH)))
 
 
 def dataset_path() -> Path:
@@ -32,19 +64,3 @@ def anthropic_api_key() -> str | None:
 def anthropic_auth_token() -> str | None:
     return os.getenv("ANTHROPIC_AUTH_TOKEN")
 
-
-def judge_backend() -> str:
-    return os.getenv("LEETCOACH_JUDGE_BACKEND", "local").strip().lower()
-
-
-def judge0_endpoint() -> str | None:
-    value = os.getenv("LEETCOACH_JUDGE0_ENDPOINT") or os.getenv("JUDGE0_ENDPOINT")
-    return value.rstrip("/") if value else None
-
-
-def judge0_auth_token() -> str | None:
-    return os.getenv("LEETCOACH_JUDGE0_AUTH_TOKEN") or os.getenv("JUDGE0_AUTH_TOKEN")
-
-
-def judge0_language_id() -> int:
-    return int(os.getenv("LEETCOACH_JUDGE0_PYTHON_LANGUAGE_ID", "71"))

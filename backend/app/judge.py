@@ -15,6 +15,7 @@ MAX_OUTPUT_CHARS = 6000
 DEFAULT_TIMEOUT_SECONDS = 10
 PASS_SENTINEL = "__LEETCOACH_PASS__"
 TEST_COUNT_PREFIX = "__LEETCOACH_TEST_COUNTS__"
+EXECUTION_TIME_PREFIX = "__LEETCOACH_EXECUTION_MS__"
 RUNTIME_PRELUDE = "from random import *"
 RUNTIME_POSTLUDE = "\n".join(
     [
@@ -144,6 +145,7 @@ class JudgeResult:
     stdout: str | None
     return_output: str | None
     runtime_ms: int
+    execution_ms: int | None
     test_count_estimate: int
     passed_test_count: int
 
@@ -207,6 +209,7 @@ def run_submission(
                 stdout=None,
                 return_output=None,
                 runtime_ms=runtime_ms,
+                execution_ms=None,
                 test_count_estimate=test_count,
                 passed_test_count=0,
             )
@@ -214,13 +217,14 @@ def run_submission(
     runtime_ms = int((time.perf_counter() - started) * 1000)
     raw_stdout = completed.stdout or ""
     passed_test_count, executed_test_count = _extract_test_counts(raw_stdout, test_count if completed.returncode == 0 else test_count)
+    execution_ms = _extract_execution_ms(raw_stdout)
     stdout = _clean_stdout(raw_stdout)
     stderr = completed.stderr or ""
     if completed.returncode == 0:
-        return JudgeResult(True, None, _trim(stderr) or None, _trim(stdout) or None, None, runtime_ms, executed_test_count, passed_test_count)
+        return JudgeResult(True, None, _trim(stderr) or None, _trim(stdout) or None, None, runtime_ms, execution_ms, executed_test_count, passed_test_count)
 
     failed = _extract_failure(stderr, source_lookup) or _extract_exception_summary(stderr) or _trim(stderr) or _trim(stdout) or "Submission failed"
-    return JudgeResult(False, failed, _trim(stderr) or None, _trim(stdout) or None, None, runtime_ms, executed_test_count, passed_test_count)
+    return JudgeResult(False, failed, _trim(stderr) or None, _trim(stdout) or None, None, runtime_ms, execution_ms, executed_test_count, passed_test_count)
 
 
 def run_custom_input(
@@ -249,27 +253,33 @@ def run_custom_input(
                 stdout=None,
                 return_output=None,
                 runtime_ms=runtime_ms,
+                execution_ms=None,
                 test_count_estimate=1,
                 passed_test_count=0,
             )
 
     runtime_ms = int((time.perf_counter() - started) * 1000)
-    return_output, printed_output = _split_custom_stdout(completed.stdout or "")
+    raw_stdout = completed.stdout or ""
+    execution_ms = _extract_execution_ms(raw_stdout)
+    return_output, printed_output = _split_custom_stdout(raw_stdout)
     stderr = _trim(completed.stderr or "") or None
     if completed.returncode == 0:
-        return JudgeResult(True, None, stderr, printed_output, return_output, runtime_ms, 1, 1)
+        return JudgeResult(True, None, stderr, printed_output, return_output, runtime_ms, execution_ms, 1, 1)
 
     failed = _extract_failure(completed.stderr or "", source_lookup) or _extract_exception_summary(completed.stderr or "") or stderr or printed_output or "Custom run failed"
-    return JudgeResult(False, failed, stderr, printed_output, return_output, runtime_ms, 1, 0)
+    return JudgeResult(False, failed, stderr, printed_output, return_output, runtime_ms, execution_ms, 1, 0)
 
 
 def _build_runner_source(prompt: str, code: str, test_code: str, entry_point: str, test_count: int) -> str:
     harness = "\n".join(
         [
             "candidate = " + entry_point,
+            "from time import perf_counter as __leetcoach_perf_counter",
+            "__leetcoach_execution_started = __leetcoach_perf_counter()",
             "try:",
             "    check(candidate)",
             "finally:",
+            "    print(" + json.dumps(EXECUTION_TIME_PREFIX) + " + f' {int((__leetcoach_perf_counter() - __leetcoach_execution_started) * 1000)}')",
             "    print(" + json.dumps(TEST_COUNT_PREFIX) + " + f' {__leetcoach_passed_assertions} {__leetcoach_seen_assertions}')",
             "print(" + json.dumps(PASS_SENTINEL) + ")",
         ]
@@ -336,9 +346,12 @@ def _submission_source_lookup(prompt: str, code: str, test_code: str, entry_poin
     harness = "\n".join(
         [
             "candidate = " + entry_point,
+            "from time import perf_counter as __leetcoach_perf_counter",
+            "__leetcoach_execution_started = __leetcoach_perf_counter()",
             "try:",
             "    check(candidate)",
             "finally:",
+            "    print(" + json.dumps(EXECUTION_TIME_PREFIX) + " + f' {int((__leetcoach_perf_counter() - __leetcoach_execution_started) * 1000)}')",
             "    print(" + json.dumps(TEST_COUNT_PREFIX) + " + f' {__leetcoach_passed_assertions} {__leetcoach_seen_assertions}')",
             "print(" + json.dumps(PASS_SENTINEL) + ")",
         ]
@@ -404,23 +417,28 @@ def _custom_harness_source(
             "        __leetcoach_missing.append(__name)",
             "if __leetcoach_missing:",
             "    raise TypeError('Missing custom input value(s): ' + ', '.join(__leetcoach_missing))",
-            "__leetcoach_result = candidate(**__leetcoach_kwargs)",
-            "__leetcoach_display_result = __leetcoach_display(__leetcoach_result)",
-            "print(" + json.dumps(RETURN_VALUE_PREFIX) + " + ' ' + repr(__leetcoach_display_result))",
-            "__leetcoach_expected_output = " + json.dumps(expected_output),
-            "__leetcoach_compare_mode = " + json.dumps(compare_mode),
-            "if __leetcoach_expected_output is not None:",
-            "    __leetcoach_expected = __leetcoach_parse_expected(__leetcoach_expected_output)",
-            "    if __leetcoach_compare_mode == 'nested_unordered':",
-            "        def __leetcoach_normalize_nested(items):",
-            "            return sorted(tuple(sorted(item)) for item in items)",
-            "        __leetcoach_matches = __leetcoach_normalize_nested(__leetcoach_display_result) == __leetcoach_normalize_nested(__leetcoach_expected)",
-            "    elif __leetcoach_compare_mode in ('unordered_sequence', 'unordered'):",
-            "        __leetcoach_matches = sorted(__leetcoach_display_result) == sorted(__leetcoach_expected)",
-            "    else:",
-            "        __leetcoach_matches = __leetcoach_display_result == __leetcoach_expected",
-            "    if not __leetcoach_matches:",
-            "        raise AssertionError(f'输出不匹配：期望 {__leetcoach_expected!r}，实际 {__leetcoach_display_result!r}')",
+            "from time import perf_counter as __leetcoach_perf_counter",
+            "__leetcoach_execution_started = __leetcoach_perf_counter()",
+            "try:",
+            "    __leetcoach_result = candidate(**__leetcoach_kwargs)",
+            "    __leetcoach_display_result = __leetcoach_display(__leetcoach_result)",
+            "    print(" + json.dumps(RETURN_VALUE_PREFIX) + " + ' ' + repr(__leetcoach_display_result))",
+            "    __leetcoach_expected_output = " + json.dumps(expected_output),
+            "    __leetcoach_compare_mode = " + json.dumps(compare_mode),
+            "    if __leetcoach_expected_output is not None:",
+            "        __leetcoach_expected = __leetcoach_parse_expected(__leetcoach_expected_output)",
+            "        if __leetcoach_compare_mode == 'nested_unordered':",
+            "            def __leetcoach_normalize_nested(items):",
+            "                return sorted(tuple(sorted(item)) for item in items)",
+            "            __leetcoach_matches = __leetcoach_normalize_nested(__leetcoach_display_result) == __leetcoach_normalize_nested(__leetcoach_expected)",
+            "        elif __leetcoach_compare_mode in ('unordered_sequence', 'unordered'):",
+            "            __leetcoach_matches = sorted(__leetcoach_display_result) == sorted(__leetcoach_expected)",
+            "        else:",
+            "            __leetcoach_matches = __leetcoach_display_result == __leetcoach_expected",
+            "        if not __leetcoach_matches:",
+            "            raise AssertionError(f'输出不匹配：期望 {__leetcoach_expected!r}，实际 {__leetcoach_display_result!r}')",
+            "finally:",
+            "    print(" + json.dumps(EXECUTION_TIME_PREFIX) + " + f' {int((__leetcoach_perf_counter() - __leetcoach_execution_started) * 1000)}')",
         ]
     )
 
@@ -537,7 +555,11 @@ def _extract_exception_summary(stderr: str) -> str | None:
 def _clean_stdout(value: str) -> str:
     return "\n".join(
         line for line in value.splitlines()
-        if line.strip() != PASS_SENTINEL and not line.startswith(TEST_COUNT_PREFIX)
+        if (
+            line.strip() != PASS_SENTINEL
+            and not line.startswith(TEST_COUNT_PREFIX)
+            and not line.startswith(EXECUTION_TIME_PREFIX)
+        )
     )
 
 
@@ -547,6 +569,8 @@ def _split_custom_stdout(value: str) -> tuple[str | None, str | None]:
     for line in value.splitlines():
         if line.startswith(RETURN_VALUE_PREFIX):
             return_output = line.removeprefix(RETURN_VALUE_PREFIX).strip()
+        elif line.startswith(EXECUTION_TIME_PREFIX):
+            continue
         else:
             printed_lines.append(line)
     return return_output, _trim("\n".join(printed_lines)) or None
@@ -569,6 +593,19 @@ def _extract_test_counts(stdout: str, fallback: int) -> tuple[int, int]:
             except ValueError:
                 return fallback, fallback
     return fallback, fallback
+
+
+def _extract_execution_ms(stdout: str) -> int | None:
+    for line in reversed(stdout.splitlines()):
+        if not line.startswith(EXECUTION_TIME_PREFIX):
+            continue
+        parts = line.split()
+        if len(parts) >= 2:
+            try:
+                return int(parts[1])
+            except ValueError:
+                return None
+    return None
 
 
 def _trim(value: str) -> str:

@@ -67,7 +67,7 @@ export function TestDock({
               role="tab"
               aria-selected={!isHistoryOpen}
             >
-              测试
+              测试用例
             </button>
             <button
               className={`test-mode-tab ${isHistoryOpen ? "selected" : ""}`}
@@ -145,30 +145,30 @@ export function TestDock({
                 onChange={(event) => selectedCase && onCaseInputChange(selectedCase.id, event.target.value)}
               />
               <div className="case-output-grid">
-                <div className="case-output-block">
-                  <span>期望输出</span>
-                  {expectedOutput ? (
-                    <pre>{expectedOutput}</pre>
-                  ) : (
-                    <p>留空时只查看输出；填写期望值后，“运行”会校验该用例。</p>
-                  )}
-                </div>
                 <div className={`case-output-block ${selectedCaseResult ? (selectedCaseResult.passed ? "passed" : "failed") : ""}`}>
-                  <span>返回值</span>
+                  <span>输出</span>
                   {returnOutput ? (
                     <pre>{returnOutput}</pre>
+                  ) : selectedCaseResult ? (
+                    <p>运行失败，右侧查看错误详情。</p>
                   ) : (
                     <p>运行后显示函数返回值。</p>
                   )}
                 </div>
                 <div className="case-output-block">
-                  <span>打印输出</span>
-                  {printedOutput ? (
-                    <pre>{printedOutput}</pre>
+                  <span>预期结果</span>
+                  {expectedOutput ? (
+                    <pre>{expectedOutput}</pre>
                   ) : (
-                    <p>没有 print 输出。</p>
+                    <p>留空时只查看输出；填写预期结果后，“运行”会校验该用例。</p>
                   )}
                 </div>
+                {printedOutput && (
+                  <div className="case-output-block stdout-block">
+                    <span>stdout</span>
+                    <pre>{printedOutput}</pre>
+                  </div>
+                )}
               </div>
             </div>
             <div className={`result-panel ${runStateClass}`}>
@@ -187,7 +187,7 @@ export function TestDock({
               {selectedCaseResult && (
                 <div className={`selected-case-status ${selectedCaseResult.passed ? "passed" : "failed"}`}>
                   <strong>{selectedCase?.name}</strong>
-                  <span>{selectedCaseResult.passed ? "通过" : "失败"} · {selectedCaseResult.runtime_ms} ms</span>
+                  <span>{selectedCaseResult.passed ? "通过" : "失败"} · {formatDuration(selectedCaseResult)}</span>
                 </div>
               )}
               {result?.failed_assertion && <pre>{result.failed_assertion}</pre>}
@@ -203,7 +203,7 @@ export function TestDock({
                     >
                       <span>{item.case.name}</span>
                       <strong>{item.response.passed ? "通过" : "失败"}</strong>
-                      <small>{item.response.runtime_ms} ms</small>
+                      <small>{formatDuration(item.response)}</small>
                     </button>
                   ))}
                 </div>
@@ -227,6 +227,18 @@ export function TestDock({
 
 function formatInlineOutput(value: string) {
   return value.replace(/\s*\r?\n\s*/g, " ").trim();
+}
+
+function formatDuration(value: { runtime_ms: number; execution_ms?: number | null }) {
+  if (value.execution_ms == null) return `总耗时 ${formatMs(value.runtime_ms)}`;
+  if (value.runtime_ms - value.execution_ms >= 50) {
+    return `执行 ${formatMs(value.execution_ms)} · 总耗时 ${formatMs(value.runtime_ms)}`;
+  }
+  return `执行 ${formatMs(value.execution_ms)}`;
+}
+
+function formatMs(value: number) {
+  return value <= 0 ? "<1 ms" : `${value} ms`;
 }
 
 function SubmissionHistory({ history, isLoading }: { history: SubmissionHistoryItem[]; isLoading: boolean }) {
@@ -270,7 +282,7 @@ function SubmissionHistory({ history, isLoading }: { history: SubmissionHistoryI
               <span>{formatTime(item.created_at)}</span>
             </div>
             <span>{item.passed_test_count}/{item.test_count_estimate} 通过</span>
-            <span>{item.runtime_ms} ms</span>
+            <span>{formatDuration(item)}</span>
           </div>
         ))}
       </div>

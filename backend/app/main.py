@@ -16,7 +16,6 @@ from .coach import (
     build_explain_prompt,
     build_note_draft_prompt,
     call_claude,
-    call_claude_messages,
     call_claude_messages_stream,
 )
 from .db import get_connection, init_db
@@ -50,6 +49,7 @@ from .schemas import (
     ProblemDetail,
     ProblemTag,
     ProblemSummary,
+    ProgressSummary,
     ReviewEvent,
     ReviewEventRequest,
     SavedSolution,
@@ -207,6 +207,41 @@ def list_problems(
     ).fetchall()
     conn.close()
     return [_problem_summary(row) for row in rows]
+
+
+@app.get("/api/progress/summary", response_model=ProgressSummary)
+def progress_summary() -> ProgressSummary:
+    conn = get_connection()
+    row = conn.execute(
+        """
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN COALESCE(s.status, 'unseen') = 'passed' THEN 1 ELSE 0 END) AS passed,
+          SUM(CASE WHEN COALESCE(s.status, 'unseen') = 'needs_review' THEN 1 ELSE 0 END) AS needs_review,
+          SUM(CASE WHEN COALESCE(s.status, 'unseen') = 'unseen' THEN 1 ELSE 0 END) AS unseen
+        FROM problems p
+        LEFT JOIN user_problem_state s ON s.user_id = ? AND s.task_id = p.task_id
+        """,
+        (DEFAULT_USER_ID,),
+    ).fetchone()
+    today_row = conn.execute(
+        """
+        SELECT COUNT(DISTINCT task_id) AS today_passed
+        FROM submissions
+        WHERE user_id = ?
+          AND passed = 1
+          AND date(datetime(created_at, '+8 hours')) = date(datetime('now', '+8 hours'))
+        """,
+        (DEFAULT_USER_ID,),
+    ).fetchone()
+    conn.close()
+    return ProgressSummary(
+        total=int(row["total"] or 0),
+        passed=int(row["passed"] or 0),
+        needs_review=int(row["needs_review"] or 0),
+        unseen=int(row["unseen"] or 0),
+        today_passed=int(today_row["today_passed"] or 0),
+    )
 
 
 @app.get("/api/problem-tags", response_model=list[ProblemTag])
@@ -434,8 +469,8 @@ def submit(request: SubmissionRequest) -> SubmissionResponse:
         cursor = conn.execute(
             """
             INSERT INTO submissions (
-              user_id, task_id, code, passed, failed_assertion, stderr, runtime_ms, test_count_estimate, passed_test_count
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+              user_id, task_id, code, passed, failed_assertion, stderr, runtime_ms, execution_ms, test_count_estimate, passed_test_count
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 DEFAULT_USER_ID,
@@ -445,6 +480,7 @@ def submit(request: SubmissionRequest) -> SubmissionResponse:
                 result.failed_assertion,
                 result.stderr,
                 result.runtime_ms,
+                result.execution_ms,
                 result.test_count_estimate,
                 result.passed_test_count,
             ),
@@ -484,7 +520,7 @@ def submission_history(task_id: str, limit: int = Query(20, ge=1, le=100)) -> li
     conn = get_connection()
     rows = conn.execute(
         """
-        SELECT id, task_id, passed, failed_assertion, runtime_ms, test_count_estimate,
+        SELECT id, task_id, passed, failed_assertion, runtime_ms, execution_ms, test_count_estimate,
                CASE
                  WHEN passed = 1 AND passed_test_count = 0 THEN test_count_estimate
                  ELSE passed_test_count
@@ -506,6 +542,7 @@ def submission_history(task_id: str, limit: int = Query(20, ge=1, le=100)) -> li
             passed=bool(row["passed"]),
             failed_assertion=row["failed_assertion"],
             runtime_ms=row["runtime_ms"],
+            execution_ms=row["execution_ms"],
             test_count_estimate=row["test_count_estimate"],
             passed_test_count=row["passed_test_count"],
             created_at=row["created_at"],
@@ -538,21 +575,7 @@ def run(request: SubmissionRequest) -> SubmissionResponse:
 
 @app.post("/api/coach/diagnose", response_model=CoachResponse)
 def diagnose(request: CoachRequest) -> CoachResponse:
-    problem = _problem_payload(_fetch_problem_row(request.task_id))
-    code, failure = _submission_context(request.task_id, request.code, request.submission_id)
-    prompt = build_diagnose_prompt(problem, code, failure)
-    text = call_claude(prompt)
-    _append_coach_message(request.task_id, "user", "请诊断我这次提交为什么失败。")
-    _append_coach_message(request.task_id, "assistant", text)
-    if request.submission_id:
-        conn = get_connection()
-        with conn:
-                conn.execute(
-                    "UPDATE submissions SET ai_diagnosis_summary = ? WHERE user_id = ? AND id = ?",
-                    (text[:1000], DEFAULT_USER_ID, request.submission_id),
-                )
-        conn.close()
-    return CoachResponse(text=text)
+    raise HTTPException(status_code=410, detail="Use /api/coach/diagnose/stream")
 
 
 @app.post("/api/coach/diagnose/stream")
@@ -570,11 +593,7 @@ def diagnose_stream(request: CoachRequest) -> StreamingResponse:
 
 @app.post("/api/coach/explain", response_model=CoachResponse)
 def explain(request: CoachRequest) -> CoachResponse:
-    problem = _problem_payload(_fetch_problem_row(request.task_id))
-    text = call_claude(build_explain_prompt(problem))
-    _append_coach_message(request.task_id, "user", "请完整讲解这道题，并总结解法范式。")
-    _append_coach_message(request.task_id, "assistant", text)
-    return CoachResponse(text=text)
+    raise HTTPException(status_code=410, detail="Use /api/coach/explain/stream")
 
 
 @app.post("/api/coach/explain/stream")
@@ -621,13 +640,7 @@ def clear_coach_thread(task_id: str) -> dict[str, str]:
 
 @app.post("/api/coach/chat", response_model=CoachResponse)
 def coach_chat(request: CoachChatRequest) -> CoachResponse:
-    problem = _problem_payload(_fetch_problem_row(request.task_id))
-    code, failure = _submission_context(request.task_id, request.code, request.submission_id)
-    messages = _coach_chat_messages(request.task_id, problem, code, failure, request.message)
-    text = call_claude_messages(messages)
-    _append_coach_message(request.task_id, "user", request.message)
-    _append_coach_message(request.task_id, "assistant", text)
-    return CoachResponse(text=text)
+    raise HTTPException(status_code=410, detail="Use /api/coach/chat/stream")
 
 
 def _coach_chat_messages(
@@ -988,19 +1001,20 @@ def _submission_response(
     result: Any,
 ) -> SubmissionResponse:
     status = "passed" if result.passed else "failed"
+    duration = _duration_summary(result)
     if mode == "run":
         title = "运行通过" if result.passed else "运行失败"
         summary = (
-            f"当前输入执行完成 · {result.runtime_ms} ms"
+            f"当前输入执行完成 · {duration}"
             if result.passed
-            else f"当前输入触发错误 · {result.runtime_ms} ms"
+            else f"当前输入触发错误 · {duration}"
         )
     else:
         title = "提交通过" if result.passed else "提交失败"
         summary = (
-            f"完整测试通过 · {result.passed_test_count}/{result.test_count_estimate} 通过 · {result.runtime_ms} ms"
+            f"完整测试通过 · {result.passed_test_count}/{result.test_count_estimate} 通过 · {duration}"
             if result.passed
-            else f"完整测试未通过 · {result.passed_test_count}/{result.test_count_estimate} 通过 · {result.runtime_ms} ms"
+            else f"完整测试未通过 · {result.passed_test_count}/{result.test_count_estimate} 通过 · {duration}"
         )
 
     return SubmissionResponse(
@@ -1012,6 +1026,20 @@ def _submission_response(
         summary=summary,
         **result.__dict__,
     )
+
+
+def _duration_summary(result: Any) -> str:
+    execution_ms = getattr(result, "execution_ms", None)
+    runtime_ms = getattr(result, "runtime_ms")
+    if execution_ms is None:
+        return f"总耗时 {_format_ms(runtime_ms)}"
+    if runtime_ms - execution_ms >= 50:
+        return f"执行 {_format_ms(execution_ms)} · 总耗时 {_format_ms(runtime_ms)}"
+    return f"执行 {_format_ms(execution_ms)}"
+
+
+def _format_ms(value: int) -> str:
+    return "<1 ms" if value <= 0 else f"{value} ms"
 
 
 def _append_coach_message(task_id: str, role: str, content: str) -> None:

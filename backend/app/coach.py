@@ -17,23 +17,7 @@ def call_claude(user_prompt: str) -> str:
 
 
 def call_claude_messages(messages: list[dict[str, str]]) -> str:
-    api_key = anthropic_api_key()
-    auth_token = anthropic_auth_token()
-    if not api_key and not auth_token:
-        return "未配置 ANTHROPIC_API_KEY 或 ANTHROPIC_AUTH_TOKEN。已跳过 Claude 调用；你仍然可以使用本地判题。"
-
-    client = Anthropic(api_key=api_key, auth_token=auth_token, base_url=anthropic_base_url())
-    response = client.messages.create(
-        model=anthropic_model(),
-        max_tokens=1800,
-        system=SYSTEM_PROMPT,
-        messages=messages,
-    )
-    chunks: list[str] = []
-    for block in response.content:
-        if getattr(block, "type", None) == "text":
-            chunks.append(block.text)
-    text = "\n".join(chunks).strip()
+    text = "".join(call_claude_messages_stream(messages)).strip()
     return text or "AI 没有返回内容。请稍后重试，或检查当前模型/API 配置。"
 
 
@@ -50,10 +34,18 @@ def call_claude_messages_stream(messages: list[dict[str, str]]) -> Iterator[str]
         max_tokens=1800,
         system=SYSTEM_PROMPT,
         messages=messages,
+        extra_body=_provider_extra_body(),
     ) as stream:
         for text in stream.text_stream:
             if text:
                 yield text
+
+
+def _provider_extra_body() -> dict | None:
+    base_url = anthropic_base_url() or ""
+    if "deepseek" in base_url.lower():
+        return {"thinking": {"type": "disabled"}}
+    return None
 
 
 def build_diagnose_prompt(problem: dict, code: str, failure: dict | None) -> str:

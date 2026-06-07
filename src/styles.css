@@ -239,7 +239,7 @@ button {
 }
 
 .brand span,
-.topbar span,
+.topbar-main span,
 .editor-toolbar span,
 .result-header span,
 .problem-count {
@@ -247,7 +247,7 @@ button {
   font-size: 13px;
 }
 
-.topbar span {
+.topbar-main span {
   font-size: 12px;
 }
 
@@ -959,7 +959,7 @@ select {
   min-width: 0;
 }
 
-.topbar strong {
+.topbar-main strong {
   display: block;
   font-size: 17px;
   line-height: 1.15;
@@ -967,15 +967,36 @@ select {
 
 .stats {
   display: flex;
-  gap: 8px;
+  justify-content: flex-end;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .stats span {
   border: 1px solid transparent;
   background: var(--surface-muted);
   color: var(--text-muted);
-  padding: 5px 8px;
-  font-size: 12px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  height: 26px;
+  padding: 4px 7px;
+  font-size: 11px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.stats strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.stats small {
+  color: var(--text-muted);
+  font-size: 11px;
   font-weight: 700;
 }
 
@@ -2546,18 +2567,32 @@ button:disabled {
     padding: 12px;
   }
 
-  .topbar,
   .problem-heading {
     align-items: flex-start;
     flex-direction: column;
   }
 
+  .topbar {
+    gap: 8px;
+  }
+
   .topbar-main {
-    width: 100%;
+    flex: 1 1 auto;
+    width: auto;
+  }
+
+  .topbar-main span {
+    display: none;
   }
 
   .stats {
-    flex-wrap: wrap;
+    flex: 0 1 auto;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .stats::-webkit-scrollbar {
+    display: none;
   }
 
   .filter-row {

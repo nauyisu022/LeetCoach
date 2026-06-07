@@ -15,6 +15,7 @@ import {
   fetchProblem,
   fetchProblems,
   fetchProblemTags,
+  fetchProgressSummary,
   fetchPracticeNote,
   fetchPracticeInsights,
   fetchPracticeQueue,
@@ -43,6 +44,7 @@ import type {
   ProblemDetail,
   ProblemTag,
   ProblemSummary,
+  ProgressSummary,
   SubmissionHistoryItem,
   SubmissionResponse,
   TopicMemory
@@ -77,25 +79,37 @@ function customCasesFromExamples(examples: ProblemDetail["input_output"]): Custo
 function aggregateRunResults(taskId: string, caseResults: RunCaseResult[]): DisplaySubmissionResponse {
   const firstFailed = caseResults.find((item) => !item.response.passed);
   const totalRuntime = caseResults.reduce((sum, item) => sum + item.response.runtime_ms, 0);
+  const executionValues = caseResults.map((item) => item.response.execution_ms);
+  const totalExecution = executionValues.every((value) => value !== null)
+    ? executionValues.reduce((sum, value) => sum + (value ?? 0), 0)
+    : null;
   const passedCount = caseResults.filter((item) => item.response.passed).length;
   const passed = passedCount === caseResults.length;
+  const duration = totalExecution !== null && totalRuntime - totalExecution >= 50
+    ? `执行 ${formatMs(totalExecution)} · 总耗时 ${formatMs(totalRuntime)}`
+    : `${formatMs(totalExecution ?? totalRuntime)}`;
   return {
     id: null,
     task_id: taskId,
     mode: "run",
     status: passed ? "passed" : "failed",
     title: passed ? "运行通过" : "运行失败",
-    summary: `${passedCount}/${caseResults.length} 个自定义用例通过 · ${totalRuntime} ms`,
+    summary: `${passedCount}/${caseResults.length} 个自定义用例通过 · ${duration}`,
     passed,
     failed_assertion: firstFailed?.response.failed_assertion ?? null,
     stderr: firstFailed?.response.stderr ?? null,
     stdout: caseResults.length === 1 ? caseResults[0].response.stdout : null,
     return_output: caseResults.length === 1 ? caseResults[0].response.return_output : null,
     runtime_ms: totalRuntime,
+    execution_ms: totalExecution,
     test_count_estimate: caseResults.length,
     passed_test_count: passedCount,
     case_results: caseResults
   };
+}
+
+function formatMs(value: number) {
+  return value <= 0 ? "<1 ms" : `${value} ms`;
 }
 
 async function runCustomCasesConcurrently(
@@ -127,6 +141,7 @@ export function App() {
   const [filters, setFilters] = useState<Filters>({});
   const [problems, setProblems] = useState<ProblemSummary[]>([]);
   const [problemTags, setProblemTags] = useState<ProblemTag[]>([]);
+  const [progressSummary, setProgressSummary] = useState<ProgressSummary>();
   const [practiceQueue, setPracticeQueue] = useState<PracticeQueueResponse>();
   const [practiceInsights, setPracticeInsights] = useState<PracticeInsightsResponse>();
   const [practiceNoteResponse, setPracticeNoteResponse] = useState<PracticeNoteResponse>();
@@ -179,6 +194,21 @@ export function App() {
       .then(setProblemTags)
       .catch((err: Error) => setError(err.message));
   }, []);
+
+  useEffect(() => {
+    let isCurrent = true;
+    fetchProgressSummary()
+      .then((summary) => {
+        if (isCurrent) setProgressSummary(summary);
+      })
+      .catch((err: Error) => {
+        if (isCurrent) setError(err.message);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [result]);
 
   useEffect(() => {
     if (selectedTaskId) {
@@ -280,11 +310,11 @@ export function App() {
     };
   }, [selectedTaskId]);
 
-  const stats = useMemo(() => {
-    const passed = problems.filter((item) => item.status === "passed").length;
-    const review = problems.filter((item) => item.status === "needs_review").length;
-    return { passed, review, loaded: problems.length };
-  }, [problems]);
+  const progressStats = useMemo(() => ({
+    total: progressSummary?.total ?? 0,
+    todayPassed: progressSummary?.today_passed ?? 0,
+    review: progressSummary?.needs_review ?? 0
+  }), [progressSummary]);
 
   useEffect(() => {
     function onResize() {
@@ -745,10 +775,19 @@ export function App() {
               <span>本地判题 · AI 讲解 · 进度记录</span>
             </div>
           </div>
-          <div className="stats">
-            <span>{stats.loaded} 题</span>
-            <span>{stats.passed} 已通过</span>
-            <span>{stats.review} 待复习</span>
+          <div className="stats" aria-label="全局进度摘要">
+            <span title={`题库总数 ${progressStats.total}`} aria-label={`题库总数 ${progressStats.total}`}>
+              <strong>{progressStats.total}</strong>
+              <small>总题</small>
+            </span>
+            <span title={`今日通过 ${progressStats.todayPassed}`} aria-label={`今日通过 ${progressStats.todayPassed}`}>
+              <strong>{progressStats.todayPassed}</strong>
+              <small>今日</small>
+            </span>
+            <span title={`待复习 ${progressStats.review}`} aria-label={`待复习 ${progressStats.review}`}>
+              <strong>{progressStats.review}</strong>
+              <small>复习</small>
+            </span>
           </div>
         </header>
         {error && <div className="error-banner">{error}</div>}

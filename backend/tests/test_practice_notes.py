@@ -30,7 +30,7 @@ def _insert_problem(conn, task_id: str = "two-sum") -> None:
 
 def test_save_note_creates_topic_memory(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
-    monkeypatch.setenv("LEETCOACH_DB_PATH", str(db_path))
+    monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
     conn = get_connection(db_path)
     init_db(conn)
     with conn:
@@ -65,7 +65,7 @@ def test_save_note_creates_topic_memory(tmp_path, monkeypatch):
 
 def test_note_draft_does_not_persist_until_saved(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
-    monkeypatch.setenv("LEETCOACH_DB_PATH", str(db_path))
+    monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
     conn = get_connection(db_path)
     init_db(conn)
     with conn:
@@ -87,7 +87,7 @@ def test_note_draft_does_not_persist_until_saved(tmp_path, monkeypatch):
 
 def test_review_note_records_event_and_sets_next_review(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
-    monkeypatch.setenv("LEETCOACH_DB_PATH", str(db_path))
+    monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
     conn = get_connection(db_path)
     init_db(conn)
     with conn:

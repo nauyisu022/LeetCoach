@@ -10,6 +10,7 @@ import type {
   ProblemDetail,
   ProblemSummary,
   ProblemTag,
+  ProgressSummary,
   SavedSolution,
   SubmissionHistoryItem,
   SubmissionResponse,
@@ -128,6 +129,10 @@ export function fetchProblemTags(): Promise<ProblemTag[]> {
   return request("/api/problem-tags");
 }
 
+export function fetchProgressSummary(): Promise<ProgressSummary> {
+  return request("/api/progress/summary");
+}
+
 export function fetchPracticeQueue(filters: Filters, currentTaskId?: string): Promise<PracticeQueueResponse> {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([key, value]) => {
@@ -210,13 +215,6 @@ export function runCode(taskId: string, code: string, customInput?: string, cust
   });
 }
 
-export function diagnose(taskId: string, code: string, submissionId?: number): Promise<{ text: string }> {
-  return request("/api/coach/diagnose", {
-    method: "POST",
-    body: JSON.stringify({ task_id: taskId, code, submission_id: submissionId })
-  });
-}
-
 export function streamDiagnose(
   taskId: string,
   code: string,
@@ -233,13 +231,6 @@ export function streamDiagnose(
     },
     onChunk
   );
-}
-
-export function explain(taskId: string): Promise<{ text: string }> {
-  return request("/api/coach/explain", {
-    method: "POST",
-    body: JSON.stringify({ task_id: taskId })
-  });
 }
 
 export function streamExplain(taskId: string, onChunk: (chunk: string) => void, signal?: AbortSignal): Promise<string> {
@@ -260,18 +251,6 @@ export function fetchCoachThread(taskId: string): Promise<{ messages: CoachMessa
 
 export function clearCoachThread(taskId: string): Promise<{ status: string }> {
   return request(`/api/coach/thread/${taskId}`, { method: "DELETE" });
-}
-
-export function sendCoachMessage(
-  taskId: string,
-  message: string,
-  code: string,
-  submissionId?: number
-): Promise<{ text: string }> {
-  return request("/api/coach/chat", {
-    method: "POST",
-    body: JSON.stringify({ task_id: taskId, message, code, submission_id: submissionId })
-  });
 }
 
 export function streamCoachMessage(

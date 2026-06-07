@@ -27,6 +27,8 @@ class Solution:
     assert result.passed is True
     assert result.test_count_estimate == 1
     assert result.stdout is None
+    assert result.execution_ms is not None
+    assert result.execution_ms <= result.runtime_ms
 
 
 def test_judge_reports_assertion_failure():
@@ -111,6 +113,8 @@ class Solution:
     assert result.passed is True
     assert result.return_output == "[0, 1]"
     assert result.stdout is None
+    assert result.execution_ms is not None
+    assert result.execution_ms <= result.runtime_ms
 
 
 def test_custom_input_separates_prints_from_return_value():

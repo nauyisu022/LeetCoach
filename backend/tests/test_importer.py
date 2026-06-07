@@ -1,4 +1,5 @@
 import json
+import os
 from pathlib import Path
 
 from app.importer import import_dataset
@@ -8,10 +9,25 @@ from app.db import get_connection, init_db
 def test_schema_initializes(tmp_path: Path):
     conn = get_connection(tmp_path / "test.db")
     init_db(conn)
-    tables = {
+    catalog_tables = {
         row["name"]
         for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
     }
+    user_tables = {
+        row["name"]
+        for row in conn.execute("SELECT name FROM userdb.sqlite_master WHERE type='table'").fetchall()
+    }
+    assert {"problems", "codetop_questions", "codetop_taxonomies"}.issubset(catalog_tables)
+    assert {
+        "users",
+        "user_problem_state",
+        "submissions",
+        "user_solutions",
+        "practice_notes",
+        "practice_note_topics",
+        "topic_memories",
+        "review_events",
+    }.issubset(user_tables)
     assert {
         "problems",
         "user_problem_state",
@@ -22,11 +38,11 @@ def test_schema_initializes(tmp_path: Path):
         "practice_note_topics",
         "topic_memories",
         "review_events",
-    }.issubset(tables)
+    }.issubset(catalog_tables | user_tables)
     user = conn.execute("SELECT id FROM users WHERE id = 'local'").fetchone()
     submission_columns = {
         row["name"]
-        for row in conn.execute("PRAGMA table_info(submissions)").fetchall()
+        for row in conn.execute("PRAGMA userdb.table_info(submissions)").fetchall()
     }
     conn.close()
     assert user is not None
@@ -66,7 +82,10 @@ def test_user_solution_is_scoped_by_user_and_problem(tmp_path: Path):
 
 
 def test_dataset_fixture_shape():
-    dataset = Path("/Users/admin/Downloads/leetcode-dataset-check/LeetCodeDataset/LeetCodeDataset-test.jsonl")
+    dataset_root = os.getenv("LEETCODE_DATASET_PATH")
+    if not dataset_root:
+        return
+    dataset = Path(dataset_root) / "LeetCodeDataset-test.jsonl"
     if not dataset.exists():
         return
     first = json.loads(dataset.read_text(encoding="utf-8").splitlines()[0])
@@ -100,7 +119,7 @@ def test_import_dataset_filters_error_outputs(tmp_path: Path, monkeypatch):
         encoding="utf-8",
     )
     db_file = tmp_path / "test.db"
-    monkeypatch.setenv("LEETCOACH_DB_PATH", str(db_file))
+    monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_file))
 
     import_dataset(source)
 
