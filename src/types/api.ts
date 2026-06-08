@@ -93,6 +93,78 @@ export type PracticeNoteDraftResponse = {
   topics: string[];
 };
 
+export type AgentToolInfo = {
+  name: string;
+  description: string;
+  trigger: string;
+  prompt_visibility: string;
+};
+
+export type AgentToolListResponse = {
+  tools: AgentToolInfo[];
+};
+
+export type AgentCommandInfo = {
+  name: string;
+  route: string;
+  default_message: string;
+  skill_name: string;
+  aliases: string[];
+  display_name: string | null;
+  toolbar_icon: string | null;
+  toolbar_order: number | null;
+};
+
+export type AgentCommandListResponse = {
+  commands: AgentCommandInfo[];
+};
+
+export type AgentProfileInfo = {
+  name: string;
+  description: string;
+  tool_names: string[];
+  command_routes: string[];
+  hook_names: string[];
+  stream_only: boolean;
+  state_backends: string[];
+};
+
+export type AgentProfileResponse = {
+  profile: AgentProfileInfo;
+};
+
+export type AgentCommandRequest = {
+  task_id: string;
+  command?: string;
+  message?: string;
+  code?: string;
+  submission_id?: number;
+  current_result?: CoachCurrentResult;
+  thinking_mode?: ThinkingMode;
+};
+
+export type AgentToolRunPreview = {
+  name: string;
+  payload: Record<string, unknown>;
+  prompt_section: string;
+  ok: boolean;
+};
+
+export type AgentCommandPreviewResponse = {
+  task_id: string;
+  command: string;
+  user_content: string;
+  thinking_mode: ThinkingMode | null;
+  current_topics: string[];
+  history_count: number;
+  memory_count: number;
+  tool_results: AgentToolRunPreview[];
+  code_present: boolean;
+  failure_present: boolean;
+  failure: Record<string, unknown> | null;
+  messages: Array<{ role: string; content: string }>;
+};
+
 export type TopicMemory = {
   user_id: string;
   topic_name: string;
@@ -186,12 +258,36 @@ export type DisplaySubmissionResponse = SubmissionResponse & {
   case_results?: CustomCaseResult[];
 };
 
-export type CoachMessage = {
+export type CoachCurrentResult = Pick<
+  DisplaySubmissionResponse,
+  | "task_id"
+  | "mode"
+  | "status"
+  | "summary"
+  | "passed"
+  | "failed_assertion"
+  | "stderr"
+  | "stdout"
+  | "return_output"
+  | "runtime_ms"
+  | "execution_ms"
+  | "test_count_estimate"
+  | "passed_test_count"
+  | "case_results"
+>;
+
+export type AgentThreadMessage = {
   id: number;
   role: "user" | "assistant";
   content: string;
   created_at: string;
 };
+
+export type AgentThreadResponse = {
+  messages: AgentThreadMessage[];
+};
+
+export type CoachMessage = AgentThreadMessage;
 
 export type ThinkingMode = "enabled" | "disabled";
 
@@ -219,6 +315,21 @@ export type AgentMemoryListResponse = {
 export type AgentMemoryUpdateRequest = {
   content?: string | null;
   status?: AgentMemoryStatus | null;
+};
+
+export type AgentProblemSearchResult = {
+  task_id: string;
+  question_id: number;
+  title: string;
+  difficulty: string;
+  tags: string[];
+  codetop_frequency?: number | null;
+};
+
+export type AgentProblemSearchResponse = {
+  query: string;
+  interpreted_topics: string[];
+  results: AgentProblemSearchResult[];
 };
 
 export type Filters = {

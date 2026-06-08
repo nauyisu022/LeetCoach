@@ -63,7 +63,7 @@ def test_save_note_creates_topic_memory(tmp_path, monkeypatch):
     assert hash_memory["common_mistakes"] == ["先返回了值而不是下标"]
 
 
-def test_note_draft_does_not_persist_until_saved(tmp_path, monkeypatch):
+def test_note_draft_requires_stream_endpoint(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
     conn = get_connection(db_path)
@@ -74,15 +74,42 @@ def test_note_draft_does_not_persist_until_saved(tmp_path, monkeypatch):
 
     from app import main
 
-    monkeypatch.setattr(main, "call_claude", lambda prompt: "# 1. two-sum\n\n## 考点\n哈希表")
     client = TestClient(main.app)
     response = client.post("/api/problems/two-sum/note/draft", json={"code": "class Solution: pass"})
+    assert response.status_code == 410
+
+
+def test_note_draft_stream_does_not_persist_until_saved(tmp_path, monkeypatch):
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
+    conn = get_connection(db_path)
+    init_db(conn)
+    with conn:
+        _insert_problem(conn)
+    conn.close()
+
+    from app import main
+
+    captured_messages = {}
+
+    def fake_stream(messages, **kwargs):
+        captured_messages["text"] = "\n".join(message["content"] for message in messages)
+        yield "# 1. two-sum\n\n"
+        yield "## 考点\n哈希表"
+
+    monkeypatch.setattr(main, "agent_model_streamer", fake_stream)
+    client = TestClient(main.app)
+    response = client.post("/api/problems/two-sum/note/draft/stream", json={"code": "class Solution: pass"})
     assert response.status_code == 200
-    assert response.json()["content_markdown"].startswith("# 1. two-sum")
+    assert response.text.startswith("# 1. two-sum")
+    assert "Agent Skill: note_draft" in captured_messages["text"]
 
     note_response = client.get("/api/problems/two-sum/note")
     assert note_response.status_code == 200
     assert note_response.json()["note"] is None
+    thread_response = client.get("/api/coach/thread/two-sum")
+    assert thread_response.status_code == 200
+    assert thread_response.json()["messages"] == []
 
 
 def test_review_note_records_event_and_sets_next_review(tmp_path, monkeypatch):

@@ -3,10 +3,61 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
+from dataclasses import dataclass
 from typing import Any
 
 VALID_MEMORY_STATUSES = {"proposed", "accepted", "rejected", "archived"}
 VALID_MEMORY_TYPES = {"preference", "weakness", "strength", "habit", "goal", "strategy"}
+
+
+@dataclass(frozen=True)
+class AgentMemoryRecord:
+    id: int
+    user_id: str
+    memory_type: str
+    scope: str
+    topic: str | None
+    task_id: str | None
+    content: str
+    source: str
+    confidence: float
+    status: str
+    created_at: str
+    updated_at: str
+
+
+@dataclass(frozen=True)
+class AgentThreadSummaryRecord:
+    task_id: str
+    summary: str
+    last_message_id: int | None
+    updated_at: str
+
+
+def memory_record_from_row(row: sqlite3.Row) -> AgentMemoryRecord:
+    return AgentMemoryRecord(
+        id=row["id"],
+        user_id=row["user_id"],
+        memory_type=row["memory_type"],
+        scope=row["scope"],
+        topic=row["topic"],
+        task_id=row["task_id"],
+        content=row["content"],
+        source=row["source"],
+        confidence=row["confidence"],
+        status=row["status"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def thread_summary_record_from_row(row: sqlite3.Row) -> AgentThreadSummaryRecord:
+    return AgentThreadSummaryRecord(
+        task_id=row["task_id"],
+        summary=row["summary"],
+        last_message_id=row["last_message_id"],
+        updated_at=row["updated_at"],
+    )
 
 
 def fetch_memory_items(
@@ -41,6 +92,20 @@ def fetch_memory_items(
         """,
         params,
     ).fetchall()
+
+
+def fetch_memory_records(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    status: str | None = None,
+    task_id: str | None = None,
+    limit: int = 80,
+) -> list[AgentMemoryRecord]:
+    return [
+        memory_record_from_row(row)
+        for row in fetch_memory_items(conn, user_id=user_id, status=status, task_id=task_id, limit=limit)
+    ]
 
 
 def fetch_memory_item(conn: sqlite3.Connection, *, user_id: str, memory_id: int) -> sqlite3.Row | None:
@@ -91,8 +156,31 @@ def update_memory_item(
     return fetch_memory_item(conn, user_id=user_id, memory_id=memory_id)
 
 
+def update_memory_record(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    memory_id: int,
+    content: str | None = None,
+    status: str | None = None,
+) -> AgentMemoryRecord | None:
+    row = update_memory_item(conn, user_id=user_id, memory_id=memory_id, content=content, status=status)
+    return memory_record_from_row(row) if row else None
+
+
 def set_memory_status(conn: sqlite3.Connection, *, user_id: str, memory_id: int, status: str) -> sqlite3.Row | None:
     return update_memory_item(conn, user_id=user_id, memory_id=memory_id, status=status)
+
+
+def set_memory_record_status(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    memory_id: int,
+    status: str,
+) -> AgentMemoryRecord | None:
+    row = set_memory_status(conn, user_id=user_id, memory_id=memory_id, status=status)
+    return memory_record_from_row(row) if row else None
 
 
 def fetch_accepted_memories_for_context(
@@ -226,6 +314,16 @@ def fetch_thread_summary(conn: sqlite3.Connection, *, user_id: str, task_id: str
         """,
         (user_id, task_id),
     ).fetchone()
+
+
+def fetch_thread_summary_record(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    task_id: str,
+) -> AgentThreadSummaryRecord | None:
+    row = fetch_thread_summary(conn, user_id=user_id, task_id=task_id)
+    return thread_summary_record_from_row(row) if row else None
 
 
 def run_after_coach_response_hook(

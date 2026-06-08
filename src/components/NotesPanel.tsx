@@ -19,7 +19,7 @@ type Props = {
   isSaving: boolean;
   isDrafting: boolean;
   onSave: (payload: PracticeNoteSaveRequest) => Promise<PracticeNote>;
-  onDraft: () => Promise<PracticeNoteDraftResponse>;
+  onDraft: (onChunk: (chunk: string) => void) => Promise<PracticeNoteDraftResponse>;
   onReview: (rating: number) => Promise<void>;
 };
 
@@ -83,10 +83,21 @@ export function NotesPanel({
       const shouldReplace = window.confirm("AI 草稿会替换当前编辑区内容，但不会自动保存。继续？");
       if (!shouldReplace) return;
     }
-    const response = await onDraft();
+    let streamedText = "";
     setDraft((current) => ({
       ...current,
-      content_markdown: response.content_markdown
+      content_markdown: ""
+    }));
+    const response = await onDraft((chunk) => {
+      streamedText += chunk;
+      setDraft((current) => ({
+        ...current,
+        content_markdown: streamedText
+      }));
+    });
+    setDraft((current) => ({
+      ...current,
+      content_markdown: response.content_markdown || streamedText
     }));
     setSourceSubmissionId(response.source_submission_id);
   }

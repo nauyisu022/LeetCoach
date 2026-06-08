@@ -7,7 +7,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .config import anthropic_api_key, anthropic_auth_token, anthropic_base_url, anthropic_model
+from .ai_client import complete_chat_messages
 from .db import get_connection, init_db
 from .judge import run_submission
 
@@ -86,20 +86,11 @@ starter code：
 
 def generate_ai_test_proposal(problem: dict[str, Any], target_strength: str = "medium") -> dict[str, Any]:
     prompt = build_test_generation_prompt(problem, target_strength)
-    api_key = anthropic_api_key()
-    auth_token = anthropic_auth_token()
-    if not api_key and not auth_token:
-        raise RuntimeError("ANTHROPIC_API_KEY or ANTHROPIC_AUTH_TOKEN is required for AI generation")
-    from anthropic import Anthropic
-
-    client = Anthropic(api_key=api_key, auth_token=auth_token, base_url=anthropic_base_url())
-    response = client.messages.create(
-        model=anthropic_model(),
-        max_tokens=4000,
+    text = complete_chat_messages(
+        [{"role": "user", "content": prompt}],
         system="You generate strict JSON test proposals for Python algorithm problems.",
-        messages=[{"role": "user", "content": prompt}],
+        max_tokens=4000,
     )
-    text = "\n".join(block.text for block in response.content if getattr(block, "type", None) == "text")
     return extract_json_object(text)
 
 

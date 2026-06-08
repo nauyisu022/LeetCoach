@@ -115,9 +115,28 @@ class PracticeNoteSaveRequest(BaseModel):
     topics: Optional[list[str]] = None
 
 
+class CoachCurrentResult(BaseModel):
+    task_id: str
+    mode: str
+    status: str
+    summary: str
+    passed: bool
+    failed_assertion: Optional[str] = None
+    stderr: Optional[str] = None
+    stdout: Optional[str] = None
+    return_output: Optional[str] = None
+    runtime_ms: Optional[int] = None
+    execution_ms: Optional[int] = None
+    test_count_estimate: Optional[int] = None
+    passed_test_count: Optional[int] = None
+    case_results: Optional[list[dict[str, Any]]] = None
+
+
 class PracticeNoteDraftRequest(BaseModel):
     code: Optional[str] = None
     submission_id: Optional[int] = None
+    current_result: Optional[CoachCurrentResult] = None
+    thinking_mode: Optional[str] = None
 
 
 class PracticeNoteDraftResponse(BaseModel):
@@ -212,6 +231,7 @@ class CoachRequest(BaseModel):
     task_id: str
     code: Optional[str] = None
     submission_id: Optional[int] = None
+    current_result: Optional[CoachCurrentResult] = None
     thinking_mode: Optional[str] = None
 
 
@@ -224,6 +244,7 @@ class CoachChatRequest(BaseModel):
     message: str
     code: Optional[str] = None
     submission_id: Optional[int] = None
+    current_result: Optional[CoachCurrentResult] = None
     thinking_mode: Optional[str] = None
 
 
@@ -233,18 +254,74 @@ class AgentCommandRequest(BaseModel):
     message: Optional[str] = None
     code: Optional[str] = None
     submission_id: Optional[int] = None
+    current_result: Optional[CoachCurrentResult] = None
     thinking_mode: Optional[str] = None
 
 
-class CoachMessage(BaseModel):
+class AgentCommandInfo(BaseModel):
+    name: str
+    route: str
+    default_message: str
+    skill_name: str
+    aliases: list[str]
+    display_name: Optional[str] = None
+    toolbar_icon: Optional[str] = None
+    toolbar_order: Optional[int] = None
+
+
+class AgentCommandListResponse(BaseModel):
+    commands: list[AgentCommandInfo]
+
+
+class AgentProfileInfo(BaseModel):
+    name: str
+    description: str
+    tool_names: list[str]
+    command_routes: list[str]
+    hook_names: list[str]
+    stream_only: bool
+    state_backends: list[str]
+
+
+class AgentProfileResponse(BaseModel):
+    profile: AgentProfileInfo
+
+
+class AgentToolRunPreview(BaseModel):
+    name: str
+    payload: dict[str, Any]
+    prompt_section: str
+    ok: bool
+
+
+class AgentCommandPreviewResponse(BaseModel):
+    task_id: str
+    command: str
+    user_content: str
+    thinking_mode: Optional[str]
+    current_topics: list[str]
+    history_count: int
+    memory_count: int
+    tool_results: list[AgentToolRunPreview]
+    code_present: bool
+    failure_present: bool
+    failure: Optional[dict[str, Any]]
+    messages: list[dict[str, str]]
+
+
+class AgentThreadMessage(BaseModel):
     id: int
     role: str
     content: str
     created_at: str
 
 
-class CoachThreadResponse(BaseModel):
-    messages: list[CoachMessage]
+class AgentThreadResponse(BaseModel):
+    messages: list[AgentThreadMessage]
+
+
+CoachMessage = AgentThreadMessage
+CoachThreadResponse = AgentThreadResponse
 
 
 class AgentMemoryItem(BaseModel):
@@ -276,3 +353,29 @@ class AgentThreadSummaryResponse(BaseModel):
     summary: Optional[str]
     last_message_id: Optional[int] = None
     updated_at: Optional[str] = None
+
+
+class AgentProblemSearchResult(BaseModel):
+    task_id: str
+    question_id: int
+    title: str
+    difficulty: str
+    tags: list[str]
+    codetop_frequency: Optional[int] = None
+
+
+class AgentProblemSearchResponse(BaseModel):
+    query: str
+    interpreted_topics: list[str]
+    results: list[AgentProblemSearchResult]
+
+
+class AgentToolInfo(BaseModel):
+    name: str
+    description: str
+    trigger: str
+    prompt_visibility: str
+
+
+class AgentToolListResponse(BaseModel):
+    tools: list[AgentToolInfo]

@@ -1,60 +1,132 @@
-import { Brain, FileText, Loader2, MessageSquare, Send, Sparkles, Trash2 } from "lucide-react";
+import { Brain, FileText, Loader2, MessageSquare, ScanSearch, Search, Send, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "./CodeBlock";
-import type { CoachMessage, ThinkingMode } from "../types/api";
+import type { AgentThreadMessage, ProblemSummary, ThinkingMode } from "../types/api";
+
+export type CoachCommandAction = {
+  command: string;
+  label: string;
+  icon: "explain" | "diagnose" | "search";
+};
 
 type Props = {
-  messages: CoachMessage[];
+  messages: AgentThreadMessage[];
   isLoading: boolean;
-  onExplain: () => void;
-  onDiagnose: () => void;
+  commandActions: CoachCommandAction[];
+  problemLinks: ProblemSummary[];
+  onCommandAction: (command: string) => void;
+  onProblemLinkClick: (taskId: string) => void;
+  onPreviewContext: (message?: string) => void;
+  onClearPreview: () => void;
   onSend: (message: string) => void;
   onClear: () => void;
+  contextPreview: string | null;
+  isPreviewLoading: boolean;
   thinkingMode: ThinkingMode;
   onThinkingModeChange: (mode: ThinkingMode) => void;
 };
 
-const markdownComponents: Components = {
-  pre({ children }) {
-    return <>{children}</>;
-  },
-  code({ className, children, ...props }) {
-    const language = /language-(\w+)/.exec(className ?? "")?.[1] ?? "";
-    const code = String(children).replace(/\n$/, "");
-    const isBlockCode = Boolean(language) || code.includes("\n");
+function commandIcon(icon: CoachCommandAction["icon"]) {
+  if (icon === "explain") return <FileText size={15} />;
+  if (icon === "search") return <Search size={15} />;
+  return <MessageSquare size={15} />;
+}
 
-    if (isBlockCode) {
-      return <CodeBlock code={code} language={language} />;
-    }
+function problemTaskIdFromHref(href: string | undefined): string | null {
+  if (!href) return null;
+  const localMatch = /^\/problems\/([^/?#]+)/.exec(href);
+  if (localMatch) return decodeURIComponent(localMatch[1]);
+  const leetcodeMatch = /^https?:\/\/(?:leetcode\.cn|leetcode\.com)\/problems\/([^/?#]+)/.exec(href);
+  if (leetcodeMatch) return decodeURIComponent(leetcodeMatch[1]);
+  return null;
+}
 
-    return (
-      <code className={className} {...props}>
-        {children}
-      </code>
-    );
+function problemReferencesFromContent(content: string, problems: ProblemSummary[]): ProblemSummary[] {
+  if (!content || !problems.length) return [];
+  const matches: ProblemSummary[] = [];
+  const seen = new Set<string>();
+  const lowerContent = content.toLowerCase();
+
+  for (const problem of problems) {
+    const title = problem.title?.trim();
+    const questionPattern = new RegExp(`leetcode\\s*${problem.question_id}(?!\\d)`, "i");
+    const hasReference = lowerContent.includes(problem.task_id.toLowerCase())
+      || (title ? content.includes(title) : false)
+      || questionPattern.test(content);
+    if (!hasReference || seen.has(problem.task_id)) continue;
+    seen.add(problem.task_id);
+    matches.push(problem);
+    if (matches.length >= 8) break;
   }
-};
+
+  return matches;
+}
 
 export function CoachPanel({
   messages = [],
   isLoading,
-  onExplain,
-  onDiagnose,
+  commandActions,
+  problemLinks,
+  onCommandAction,
+  onProblemLinkClick,
+  onPreviewContext,
+  onClearPreview,
   onSend,
   onClear,
+  contextPreview,
+  isPreviewLoading,
   thinkingMode,
   onThinkingModeChange
 }: Props) {
   const [draft, setDraft] = useState("");
   const outputRef = useRef<HTMLDivElement | null>(null);
+  const markdownComponents: Components = {
+    pre({ children }) {
+      return <>{children}</>;
+    },
+    code({ className, children, ...props }) {
+      const language = /language-(\w+)/.exec(className ?? "")?.[1] ?? "";
+      const code = String(children).replace(/\n$/, "");
+      const isBlockCode = Boolean(language) || code.includes("\n");
+
+      if (isBlockCode) {
+        return <CodeBlock code={code} language={language} />;
+      }
+
+      return (
+        <code className={className} {...props}>
+          {children}
+        </code>
+      );
+    },
+    a({ href, children, ...props }) {
+      const taskId = problemTaskIdFromHref(href);
+      if (!taskId) {
+        return (
+          <a href={href} target="_blank" rel="noreferrer" {...props}>
+            {children}
+          </a>
+        );
+      }
+      return (
+        <button
+          className="markdown-problem-link"
+          type="button"
+          onClick={() => onProblemLinkClick(taskId)}
+        >
+          {children}
+        </button>
+      );
+    }
+  };
 
   useEffect(() => {
     if (!outputRef.current) return;
     outputRef.current.scrollTop = outputRef.current.scrollHeight;
-  }, [messages, isLoading]);
+  }, [messages, isLoading, contextPreview, isPreviewLoading]);
 
   function submitDraft() {
     const message = draft.trim();
@@ -63,12 +135,32 @@ export function CoachPanel({
     onSend(message);
   }
 
-  function renderMessageContent(message: CoachMessage) {
+  function renderMessageContent(message: AgentThreadMessage) {
     if (message.content) {
+      const problemReferences = message.role === "assistant"
+        ? problemReferencesFromContent(message.content, problemLinks)
+        : [];
       return (
-        <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
-          {message.content}
-        </ReactMarkdown>
+        <>
+          <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+            {message.content}
+          </ReactMarkdown>
+          {problemReferences.length > 0 && (
+            <div className="message-problem-links" aria-label="推荐题跳转">
+              {problemReferences.map((item) => (
+                <button
+                  className="problem-link-chip"
+                  key={item.task_id}
+                  type="button"
+                  onClick={() => onProblemLinkClick(item.task_id)}
+                >
+                  <span>{item.question_id}. {item.title}</span>
+                  <small>{item.difficulty}</small>
+                </button>
+              ))}
+            </div>
+          )}
+        </>
       );
     }
 
@@ -86,13 +178,24 @@ export function CoachPanel({
           <Brain size={16} />
           AI 教练对话
         </div>
-        <button className="ghost-button" onClick={onExplain} disabled={isLoading}>
-          <FileText size={15} />
-          讲解
-        </button>
-        <button className="ghost-button" onClick={onDiagnose} disabled={isLoading}>
-          <MessageSquare size={15} />
-          诊断
+        {commandActions.map((action) => (
+          <button
+            className="ghost-button"
+            key={action.command}
+            onClick={() => onCommandAction(action.command)}
+            disabled={isLoading}
+          >
+            {commandIcon(action.icon)}
+            {action.label}
+          </button>
+        ))}
+        <button
+          className="ghost-button"
+          onClick={() => onPreviewContext(draft.trim() || undefined)}
+          disabled={isLoading || isPreviewLoading}
+        >
+          {isPreviewLoading ? <Loader2 className="spin" size={15} /> : <ScanSearch size={15} />}
+          上下文
         </button>
         <button className="ghost-button" onClick={onClear} disabled={isLoading || messages.length === 0}>
           <Trash2 size={15} />
@@ -110,6 +213,21 @@ export function CoachPanel({
         </button>
       </div>
       <div className="coach-output" ref={outputRef}>
+        {contextPreview && (
+          <article className="agent-preview">
+            <div className="agent-preview-header">
+              <span>Agent Preview</span>
+              <button className="icon-button" type="button" onClick={onClearPreview} aria-label="关闭上下文预览">
+                <X size={15} />
+              </button>
+            </div>
+            <div className="markdown-body">
+              <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+                {contextPreview}
+              </ReactMarkdown>
+            </div>
+          </article>
+        )}
         {messages.length > 0 ? (
           messages.map((message) => (
             <article className={`chat-message ${message.role}`} key={message.id}>

@@ -1,9 +1,16 @@
 import type {
+  AgentCommandListResponse,
+  AgentCommandPreviewResponse,
+  AgentCommandRequest,
   AgentMemoryItem,
   AgentMemoryListResponse,
   AgentMemoryStatus,
   AgentMemoryUpdateRequest,
-  CoachMessage,
+  AgentProfileResponse,
+  AgentProblemSearchResponse,
+  AgentThreadResponse,
+  AgentToolListResponse,
+  CoachCurrentResult,
   Filters,
   PracticeInsightsResponse,
   PracticeNote,
@@ -168,11 +175,34 @@ export function savePracticeNote(taskId: string, payload: PracticeNoteSaveReques
   });
 }
 
-export function draftPracticeNote(taskId: string, code: string, submissionId?: number): Promise<PracticeNoteDraftResponse> {
-  return request(`/api/problems/${taskId}/note/draft`, {
-    method: "POST",
-    body: JSON.stringify({ code, submission_id: submissionId })
-  });
+export async function streamPracticeNoteDraft(
+  taskId: string,
+  code: string,
+  submissionId: number | undefined,
+  currentResult: CoachCurrentResult | undefined,
+  thinkingMode: ThinkingMode,
+  onChunk: (chunk: string) => void,
+  signal?: AbortSignal
+): Promise<PracticeNoteDraftResponse> {
+  const content = await streamRequest(
+    `/api/problems/${taskId}/note/draft/stream`,
+    {
+      method: "POST",
+      signal,
+      body: JSON.stringify({
+        code,
+        submission_id: submissionId,
+        current_result: currentResult,
+        thinking_mode: thinkingMode
+      })
+    },
+    onChunk
+  );
+  return {
+    content_markdown: content,
+    source_submission_id: submissionId ?? null,
+    topics: []
+  };
 }
 
 export function reviewPracticeNote(taskId: string, rating: number): Promise<{ rating: number }> {
@@ -192,6 +222,25 @@ export function fetchAgentMemories(status?: AgentMemoryStatus, taskId?: string):
   if (taskId) params.set("task_id", taskId);
   const suffix = params.toString();
   return request(`/api/agent/memories${suffix ? `?${suffix}` : ""}`);
+}
+
+export function fetchAgentTools(): Promise<AgentToolListResponse> {
+  return request("/api/agent/tools");
+}
+
+export function fetchAgentCommands(): Promise<AgentCommandListResponse> {
+  return request("/api/agent/commands");
+}
+
+export function fetchAgentProfile(): Promise<AgentProfileResponse> {
+  return request("/api/agent/profile");
+}
+
+export function previewAgentCommand(payload: AgentCommandRequest): Promise<AgentCommandPreviewResponse> {
+  return request("/api/agent/command/preview", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export function updateAgentMemory(memoryId: number, payload: AgentMemoryUpdateRequest): Promise<AgentMemoryItem> {
@@ -243,66 +292,42 @@ export function runCode(taskId: string, code: string, customInput?: string, cust
   });
 }
 
-export function streamDiagnose(
-  taskId: string,
-  code: string,
-  submissionId: number | undefined,
-  thinkingMode: ThinkingMode,
+export function streamAgentCommand(
+  payload: AgentCommandRequest,
   onChunk: (chunk: string) => void,
   signal?: AbortSignal
 ): Promise<string> {
   return streamRequest(
-    "/api/coach/diagnose/stream",
+    "/api/agent/command/stream",
     {
       method: "POST",
       signal,
-      body: JSON.stringify({ task_id: taskId, code, submission_id: submissionId, thinking_mode: thinkingMode })
+      body: JSON.stringify(payload)
     },
     onChunk
   );
 }
 
-export function streamExplain(
-  taskId: string,
-  thinkingMode: ThinkingMode,
-  onChunk: (chunk: string) => void,
-  signal?: AbortSignal
-): Promise<string> {
-  return streamRequest(
-    "/api/coach/explain/stream",
-    {
-      method: "POST",
-      signal,
-      body: JSON.stringify({ task_id: taskId, thinking_mode: thinkingMode })
-    },
-    onChunk
-  );
+export function fetchAgentThread(taskId: string): Promise<AgentThreadResponse> {
+  return request(`/api/agent/thread/${taskId}`);
 }
 
-export function fetchCoachThread(taskId: string): Promise<{ messages: CoachMessage[] }> {
-  return request(`/api/coach/thread/${taskId}`);
+export function clearAgentThread(taskId: string): Promise<{ status: string }> {
+  return request(`/api/agent/thread/${taskId}`, { method: "DELETE" });
+}
+
+export function fetchCoachThread(taskId: string): Promise<AgentThreadResponse> {
+  return fetchAgentThread(taskId);
 }
 
 export function clearCoachThread(taskId: string): Promise<{ status: string }> {
-  return request(`/api/coach/thread/${taskId}`, { method: "DELETE" });
+  return clearAgentThread(taskId);
 }
 
-export function streamCoachMessage(
-  taskId: string,
-  message: string,
-  code: string,
-  submissionId: number | undefined,
-  thinkingMode: ThinkingMode,
-  onChunk: (chunk: string) => void,
-  signal?: AbortSignal
-): Promise<string> {
-  return streamRequest(
-    "/api/coach/chat/stream",
-    {
-      method: "POST",
-      signal,
-      body: JSON.stringify({ task_id: taskId, message, code, submission_id: submissionId, thinking_mode: thinkingMode })
-    },
-    onChunk
-  );
+export function searchAgentProblems(query: string, currentTaskId?: string, limit = 8): Promise<AgentProblemSearchResponse> {
+  const params = new URLSearchParams();
+  params.set("q", query);
+  params.set("limit", String(limit));
+  if (currentTaskId) params.set("current_task_id", currentTaskId);
+  return request(`/api/agent/tools/problem-search?${params.toString()}`);
 }

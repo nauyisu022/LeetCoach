@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Allotment, setSashSize } from "allotment";
 import "allotment/dist/style.css";
 import { BookMarked, BookOpen, Brain, Database, PanelLeftOpen } from "lucide-react";
-import { CoachPanel } from "./components/CoachPanel";
+import { CoachPanel, type CoachCommandAction } from "./components/CoachPanel";
 import { EditorPanel } from "./components/EditorPanel";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { NotesPanel } from "./components/NotesPanel";
@@ -11,10 +11,10 @@ import { ProblemPanel } from "./components/ProblemPanel";
 import { TestDock } from "./components/TestDock";
 import {
   acceptAgentMemory,
-  clearCoachThread,
-  draftPracticeNote,
+  clearAgentThread,
+  fetchAgentCommands,
   fetchAgentMemories,
-  fetchCoachThread,
+  fetchAgentThread,
   fetchProblem,
   fetchProblems,
   fetchProblemTags,
@@ -24,20 +24,22 @@ import {
   fetchPracticeQueue,
   fetchSubmissionHistory,
   fetchTopicMemories,
+  previewAgentCommand,
   rejectAgentMemory,
   reviewPracticeNote,
   runCode,
   savePracticeNote,
   saveSolution,
-  streamCoachMessage,
-  streamDiagnose,
-  streamExplain,
+  streamAgentCommand,
+  streamPracticeNoteDraft,
   submitCode,
   updateAgentMemory
 } from "./lib/api";
 import type {
   AgentMemoryItem,
-  CoachMessage,
+  AgentCommandInfo,
+  AgentCommandPreviewResponse,
+  AgentThreadMessage,
   CustomTestCase,
   DisplaySubmissionResponse,
   Filters,
@@ -65,7 +67,18 @@ const FALLBACK_CUSTOM_INPUT = "nums = [2,7,11,15]\ntarget = 9";
 const SELECTED_TASK_STORAGE_KEY = "leetcoach:selected-task-id";
 const AI_THINKING_STORAGE_KEY = "leetcoach:ai-thinking-mode";
 
+const FALLBACK_COACH_COMMANDS: CoachCommandAction[] = [
+  { command: "/explain", label: "讲解", icon: "explain" },
+  { command: "/diagnose", label: "诊断", icon: "diagnose" },
+  { command: "/search-problems", label: "找题", icon: "search" }
+];
+
 type RunCaseResult = { case: CustomTestCase; response: SubmissionResponse };
+
+function toolbarIcon(value: string | null | undefined): CoachCommandAction["icon"] {
+  if (value === "explain" || value === "search" || value === "diagnose") return value;
+  return "diagnose";
+}
 
 function cleanExampleInput(input: string) {
   return input
@@ -145,6 +158,44 @@ async function runCustomCasesConcurrently(
   return caseResults;
 }
 
+function formatAgentPreview(preview: AgentCommandPreviewResponse): string {
+  const failureLine = preview.failure_present
+    ? `有：${safeInline(preview.failure?.failed_assertion ?? preview.failure?.summary ?? preview.failure?.source)}`
+    : "无";
+  const toolLines = preview.tool_results.map((tool) => {
+    const payloadKeys = Object.keys(tool.payload);
+    const suffix = payloadKeys.length ? ` (${payloadKeys.join(", ")})` : "";
+    const status = tool.ok ? "ok" : "failed";
+    return `- ${tool.name}：${status}${suffix}`;
+  });
+  const promptSummary = preview.messages
+    .map((message, index) => `### ${index + 1}. ${message.role}\n\n${message.content}`)
+    .join("\n\n");
+
+  return [
+    "## Agent 上下文预览",
+    `- 命令：${preview.command}`,
+    `- 用户问题：${preview.user_content}`,
+    `- Thinking：${preview.thinking_mode ?? "未设置"}`,
+    `- 主题：${preview.current_topics.join("、") || "无"}`,
+    `- 历史消息：${preview.history_count}`,
+    `- 已确认记忆：${preview.memory_count}`,
+    `- 当前代码：${preview.code_present ? "有" : "无"}`,
+    `- 失败信息：${failureLine}`,
+    "",
+    "## 工具结果",
+    toolLines.length ? toolLines.join("\n") : "- 无",
+    "",
+    "## Prompt 摘要",
+    promptSummary || "无"
+  ].join("\n");
+}
+
+function safeInline(value: unknown): string {
+  const text = value === null || value === undefined ? "" : String(value);
+  return text.length <= 160 ? text : `${text.slice(0, 160)}...`;
+}
+
 export function App() {
   const [filters, setFilters] = useState<Filters>({});
   const [problems, setProblems] = useState<ProblemSummary[]>([]);
@@ -155,6 +206,7 @@ export function App() {
   const [practiceNoteResponse, setPracticeNoteResponse] = useState<PracticeNoteResponse>();
   const [topicMemories, setTopicMemories] = useState<TopicMemory[]>([]);
   const [agentMemories, setAgentMemories] = useState<AgentMemoryItem[]>([]);
+  const [agentCommands, setAgentCommands] = useState<AgentCommandInfo[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(() => (
     window.localStorage.getItem(SELECTED_TASK_STORAGE_KEY) ?? undefined
   ));
@@ -166,7 +218,7 @@ export function App() {
   const [isHistoryLoading, setHistoryLoading] = useState(false);
   const [customCases, setCustomCases] = useState<CustomTestCase[]>(() => customCasesFromExamples([]));
   const [selectedCaseId, setSelectedCaseId] = useState("case-1");
-  const [coachMessages, setCoachMessages] = useState<CoachMessage[]>([]);
+  const [coachMessages, setCoachMessages] = useState<AgentThreadMessage[]>([]);
   const [thinkingMode, setThinkingMode] = useState<ThinkingMode>(() => (
     window.localStorage.getItem(AI_THINKING_STORAGE_KEY) === "disabled" ? "disabled" : "enabled"
   ));
@@ -181,6 +233,8 @@ export function App() {
   const [solutionDirty, setSolutionDirty] = useState(false);
   const [solutionSavedAt, setSolutionSavedAt] = useState<string>();
   const [isCoachLoading, setCoachLoading] = useState(false);
+  const [isAgentPreviewLoading, setAgentPreviewLoading] = useState(false);
+  const [agentPreview, setAgentPreview] = useState<string | null>(null);
   const [error, setError] = useState<string>();
   const [isProblemDrawerOpen, setProblemDrawerOpen] = useState(false);
   const [learningTab, setLearningTab] = useState<"coach" | "notes" | "memory">("coach");
@@ -223,6 +277,21 @@ export function App() {
 
   useEffect(() => {
     let isCurrent = true;
+    fetchAgentCommands()
+      .then((response) => {
+        if (isCurrent) setAgentCommands(response.commands);
+      })
+      .catch(() => {
+        if (isCurrent) setAgentCommands([]);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isCurrent = true;
     fetchProgressSummary()
       .then((summary) => {
         if (isCurrent) setProgressSummary(summary);
@@ -242,6 +311,7 @@ export function App() {
     } else {
       window.localStorage.removeItem(SELECTED_TASK_STORAGE_KEY);
     }
+    setAgentPreview(null);
   }, [selectedTaskId]);
 
   useEffect(() => {
@@ -327,7 +397,7 @@ export function App() {
       return;
     }
     let isCurrent = true;
-    fetchCoachThread(selectedTaskId)
+    fetchAgentThread(selectedTaskId)
       .then((thread) => {
         if (isCurrent) setCoachMessages(thread.messages ?? []);
       })
@@ -354,6 +424,23 @@ export function App() {
     todayPassed: progressSummary?.today_passed ?? 0,
     review: progressSummary?.needs_review ?? 0
   }), [progressSummary]);
+
+  const agentCommandsByName = useMemo(() => (
+    new Map(agentCommands.map((command) => [command.name, command]))
+  ), [agentCommands]);
+
+  const coachCommandActions = useMemo(() => (
+    agentCommands.length
+      ? agentCommands
+        .filter((command) => command.toolbar_order !== null)
+        .sort((left, right) => (left.toolbar_order ?? 0) - (right.toolbar_order ?? 0))
+        .map((command) => ({
+          command: command.name,
+          label: command.display_name ?? command.name,
+          icon: toolbarIcon(command.toolbar_icon)
+        }))
+      : FALLBACK_COACH_COMMANDS.map((action) => ({ ...action }))
+  ), [agentCommands]);
 
   useEffect(() => {
     function onResize() {
@@ -588,13 +675,13 @@ export function App() {
     const userId = -now;
     const assistantId = -(now + 1);
     const createdAt = new Date().toISOString();
-    const userMessage: CoachMessage = {
+    const userMessage: AgentThreadMessage = {
       id: userId,
       role: "user",
       content: userContent,
       created_at: createdAt
     };
-    const assistantMessage: CoachMessage = {
+    const assistantMessage: AgentThreadMessage = {
       id: assistantId,
       role: "assistant",
       content: "",
@@ -629,24 +716,32 @@ export function App() {
     return err instanceof DOMException && err.name === "AbortError";
   }
 
-  async function handleDiagnose() {
+  async function runAgentCommand(command: string, options?: { message?: string; includeCode?: boolean; includeResult?: boolean }) {
     if (!problem) return;
+    const commandInfo = agentCommandsByName.get(command);
+    const message = options?.message ?? (command === "/search-problems" ? commandInfo?.default_message ?? "有哪些经典题和同类练习？" : undefined);
+    const userContent = message ?? commandInfo?.default_message ?? command;
     setCoachLoading(true);
     setError(undefined);
-    const userContent = "请诊断我这次提交为什么失败。";
+    setAgentPreview(null);
     const { userId, assistantId } = startStreamingCoachTurn(userContent);
     const controller = new AbortController();
     coachAbortRef.current = controller;
     try {
-      await streamDiagnose(
-        problem.task_id,
-        code,
-        result?.id ?? undefined,
-        thinkingMode,
+      await streamAgentCommand(
+        {
+          task_id: problem.task_id,
+          command,
+          message,
+          code: options?.includeCode ? code : undefined,
+          submission_id: options?.includeResult ? result?.id ?? undefined : undefined,
+          current_result: options?.includeResult && result?.task_id === problem.task_id ? result : undefined,
+          thinking_mode: thinkingMode
+        },
         (chunk) => appendCoachChunk(assistantId, chunk),
         controller.signal
       );
-      const thread = await fetchCoachThread(problem.task_id);
+      const thread = await fetchAgentThread(problem.task_id);
       setCoachMessages(thread.messages);
       void refreshAgentMemoryList(problem.task_id);
     } catch (err) {
@@ -662,50 +757,41 @@ export function App() {
     }
   }
 
-  async function handleExplain() {
-    if (!problem) return;
-    setCoachLoading(true);
-    setError(undefined);
-    const userContent = "请完整讲解这道题，并总结解法范式。";
-    const { userId, assistantId } = startStreamingCoachTurn(userContent);
-    const controller = new AbortController();
-    coachAbortRef.current = controller;
-    try {
-      await streamExplain(problem.task_id, thinkingMode, (chunk) => appendCoachChunk(assistantId, chunk), controller.signal);
-      const thread = await fetchCoachThread(problem.task_id);
-      setCoachMessages(thread.messages);
-      void refreshAgentMemoryList(problem.task_id);
-    } catch (err) {
-      if (isAbortError(err)) {
-        markCoachStopped(assistantId);
-      } else {
-        setError((err as Error).message);
-        removeStreamingCoachTurn(userId, assistantId);
-      }
-    } finally {
-      if (coachAbortRef.current === controller) coachAbortRef.current = null;
-      setCoachLoading(false);
+  function handleCoachCommand(command: string) {
+    if (command === "/diagnose") {
+      void runAgentCommand(command, { includeCode: true, includeResult: true });
+      return;
     }
+    if (command === "/search-problems") {
+      void runAgentCommand(command, { includeCode: true, includeResult: true });
+      return;
+    }
+    void runAgentCommand(command);
   }
 
   async function handleCoachSend(message: string) {
     if (!problem) return;
     setCoachLoading(true);
     setError(undefined);
+    setAgentPreview(null);
     const { userId, assistantId } = startStreamingCoachTurn(message);
     const controller = new AbortController();
     coachAbortRef.current = controller;
     try {
-      await streamCoachMessage(
-        problem.task_id,
-        message,
-        code,
-        result?.id ?? undefined,
-        thinkingMode,
+      await streamAgentCommand(
+        {
+          task_id: problem.task_id,
+          command: "auto",
+          message,
+          code,
+          submission_id: result?.id ?? undefined,
+          current_result: result?.task_id === problem.task_id ? result : undefined,
+          thinking_mode: thinkingMode
+        },
         (chunk) => appendCoachChunk(assistantId, chunk),
         controller.signal
       );
-      const thread = await fetchCoachThread(problem.task_id);
+      const thread = await fetchAgentThread(problem.task_id);
       setCoachMessages(thread.messages);
       void refreshAgentMemoryList(problem.task_id);
     } catch (err) {
@@ -718,6 +804,29 @@ export function App() {
     } finally {
       if (coachAbortRef.current === controller) coachAbortRef.current = null;
       setCoachLoading(false);
+    }
+  }
+
+  async function handlePreviewAgentContext(message?: string) {
+    if (!problem) return;
+    setAgentPreviewLoading(true);
+    setError(undefined);
+    try {
+      const trimmed = message?.trim();
+      const preview = await previewAgentCommand({
+        task_id: problem.task_id,
+        command: trimmed ? "auto" : "/diagnose",
+        message: trimmed || undefined,
+        code,
+        submission_id: result?.id ?? undefined,
+        current_result: result?.task_id === problem.task_id ? result : undefined,
+        thinking_mode: thinkingMode
+      });
+      setAgentPreview(formatAgentPreview(preview));
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setAgentPreviewLoading(false);
     }
   }
 
@@ -725,8 +834,9 @@ export function App() {
     if (!problem) return;
     setError(undefined);
     try {
-      await clearCoachThread(problem.task_id);
+      await clearAgentThread(problem.task_id);
       setCoachMessages([]);
+      setAgentPreview(null);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -754,19 +864,26 @@ export function App() {
     }
   }, [problem]);
 
-  const handlePracticeNoteDraft = useCallback(async (): Promise<PracticeNoteDraftResponse> => {
+  const handlePracticeNoteDraft = useCallback(async (onChunk: (chunk: string) => void): Promise<PracticeNoteDraftResponse> => {
     if (!problem) throw new Error("No problem selected");
     setDraftingNote(true);
     setError(undefined);
     try {
-      return await draftPracticeNote(problem.task_id, code, result?.id ?? undefined);
+      return await streamPracticeNoteDraft(
+        problem.task_id,
+        code,
+        result?.id ?? undefined,
+        result?.task_id === problem.task_id ? result : undefined,
+        thinkingMode,
+        onChunk
+      );
     } catch (err) {
       setError((err as Error).message);
       throw err;
     } finally {
       setDraftingNote(false);
     }
-  }, [code, problem, result?.id]);
+  }, [code, problem, result, thinkingMode]);
 
   const handlePracticeNoteReview = useCallback(async (rating: number) => {
     if (!problem) return;
@@ -958,7 +1075,7 @@ export function App() {
                     onCaseInputChange={handleCaseInputChange}
                     onCaseAdd={handleCaseAdd}
                     onCaseRemove={handleCaseRemove}
-                    onDiagnose={handleDiagnose}
+                    onDiagnose={() => handleCoachCommand("/diagnose")}
                     onRun={handleRun}
                     onSubmit={handleSubmit}
                     onHistoryToggle={handleHistoryToggle}
@@ -1002,18 +1119,24 @@ export function App() {
 	                    Memory
 	                  </button>
 	                </div>
-                <div className="learning-content">
-                  <div className={`learning-content-pane ${learningTab === "coach" ? "active" : ""}`} aria-hidden={learningTab !== "coach"}>
+	                <div className="learning-content">
+	                  <div className={`learning-content-pane ${learningTab === "coach" ? "active" : ""}`} aria-hidden={learningTab !== "coach"}>
                     <CoachPanel
                       messages={coachMessages}
                       isLoading={isCoachLoading}
-                      onExplain={handleExplain}
-	                      onDiagnose={handleDiagnose}
-	                      onSend={handleCoachSend}
-	                      onClear={handleCoachClear}
-	                      thinkingMode={thinkingMode}
-	                      onThinkingModeChange={setThinkingMode}
-	                    />
+                      commandActions={coachCommandActions}
+                      problemLinks={problems}
+                      onCommandAction={handleCoachCommand}
+                      onProblemLinkClick={(taskId) => void handleProblemSelect(taskId)}
+                      onPreviewContext={handlePreviewAgentContext}
+                      onClearPreview={() => setAgentPreview(null)}
+                      onSend={handleCoachSend}
+                      onClear={handleCoachClear}
+                      contextPreview={agentPreview}
+                      isPreviewLoading={isAgentPreviewLoading}
+                      thinkingMode={thinkingMode}
+                      onThinkingModeChange={setThinkingMode}
+                    />
                   </div>
                   <div className={`learning-content-pane ${learningTab === "notes" ? "active" : ""}`} aria-hidden={learningTab !== "notes"}>
                     <NotesPanel
