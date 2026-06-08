@@ -193,6 +193,34 @@ export type CoachMessage = {
   created_at: string;
 };
 
+export type ThinkingMode = "enabled" | "disabled";
+
+export type AgentMemoryStatus = "proposed" | "accepted" | "rejected" | "archived";
+
+export type AgentMemoryItem = {
+  id: number;
+  user_id: string;
+  memory_type: string;
+  scope: "global" | "topic" | "task" | string;
+  topic: string | null;
+  task_id: string | null;
+  content: string;
+  source: string;
+  confidence: number;
+  status: AgentMemoryStatus;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentMemoryListResponse = {
+  memories: AgentMemoryItem[];
+};
+
+export type AgentMemoryUpdateRequest = {
+  content?: string | null;
+  status?: AgentMemoryStatus | null;
+};
+
 export type Filters = {
   difficulty?: string;
   tags?: string[];

@@ -1,10 +1,10 @@
-import { Brain, FileText, Loader2, MessageSquare, Send, Trash2 } from "lucide-react";
+import { Brain, FileText, Loader2, MessageSquare, Send, Sparkles, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "./CodeBlock";
-import type { CoachMessage } from "../types/api";
+import type { CoachMessage, ThinkingMode } from "../types/api";
 
 type Props = {
   messages: CoachMessage[];
@@ -13,6 +13,8 @@ type Props = {
   onDiagnose: () => void;
   onSend: (message: string) => void;
   onClear: () => void;
+  thinkingMode: ThinkingMode;
+  onThinkingModeChange: (mode: ThinkingMode) => void;
 };
 
 const markdownComponents: Components = {
@@ -36,7 +38,16 @@ const markdownComponents: Components = {
   }
 };
 
-export function CoachPanel({ messages = [], isLoading, onExplain, onDiagnose, onSend, onClear }: Props) {
+export function CoachPanel({
+  messages = [],
+  isLoading,
+  onExplain,
+  onDiagnose,
+  onSend,
+  onClear,
+  thinkingMode,
+  onThinkingModeChange
+}: Props) {
   const [draft, setDraft] = useState("");
   const outputRef = useRef<HTMLDivElement | null>(null);
 
@@ -86,6 +97,16 @@ export function CoachPanel({ messages = [], isLoading, onExplain, onDiagnose, on
         <button className="ghost-button" onClick={onClear} disabled={isLoading || messages.length === 0}>
           <Trash2 size={15} />
           清空
+        </button>
+        <button
+          className={`thinking-toggle ${thinkingMode === "enabled" ? "active" : ""}`}
+          type="button"
+          onClick={() => onThinkingModeChange(thinkingMode === "enabled" ? "disabled" : "enabled")}
+          aria-pressed={thinkingMode === "enabled"}
+          title={thinkingMode === "enabled" ? "DeepSeek Thinking 已开启" : "DeepSeek Thinking 已关闭"}
+        >
+          <Sparkles size={15} />
+          {thinkingMode === "enabled" ? "Thinking 开" : "Thinking 关"}
         </button>
       </div>
       <div className="coach-output" ref={outputRef}>

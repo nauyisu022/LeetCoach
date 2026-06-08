@@ -17,6 +17,12 @@ It is designed for local self-hosting: the app code is in this repository, while
 
 ## Quick Start
 
+Install `uv` if you do not already have it:
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
 Clone the repository:
 
 ```bash
@@ -30,11 +36,10 @@ Install frontend dependencies:
 npm install
 ```
 
-Create the backend virtual environment:
+Install backend dependencies:
 
 ```bash
-python3 -m venv backend/.venv
-backend/.venv/bin/pip install -r backend/requirements.txt
+uv sync
 ```
 
 Prepare problem data:
@@ -52,13 +57,13 @@ data/LeetCodeDataset/
 Import the problem catalog:
 
 ```bash
-PYTHONPATH=backend backend/.venv/bin/python -m app.importer
+uv run leetcoach-import
 ```
 
 Start the backend:
 
 ```bash
-backend/.venv/bin/uvicorn app.main:app --app-dir backend --reload --host 127.0.0.1 --port 8000
+uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 ```
 
 Start the frontend in another terminal:
@@ -87,7 +92,7 @@ You can use a different dataset path:
 
 ```bash
 export LEETCODE_DATASET_PATH=/path/to/LeetCodeDataset
-PYTHONPATH=backend backend/.venv/bin/python -m app.importer
+uv run leetcoach-import
 ```
 
 Problem data is written to:
@@ -138,20 +143,19 @@ LeetCoach runs Python submissions locally. The backend builds a temporary runner
 Sync CodeTop metadata into `data/catalog.db`:
 
 ```bash
-PYTHONPATH=backend backend/.venv/bin/python -m app.codetop --max-pages 1
+uv run leetcoach-codetop --max-pages 1
 ```
 
 Run a fuller sync by removing `--max-pages`:
 
 ```bash
-PYTHONPATH=backend backend/.venv/bin/python -m app.codetop
+uv run leetcoach-codetop
 ```
 
 Report high-frequency CodeTop gaps:
 
 ```bash
-cd backend
-python -m app.codetop_gap --report --top 10
+uv run leetcoach-codetop-gap --report --top 10
 ```
 
 ## Development
@@ -159,7 +163,7 @@ python -m app.codetop_gap --report --top 10
 Run backend tests:
 
 ```bash
-PYTHONPATH=backend backend/.venv/bin/python -m pytest backend/tests
+uv run pytest backend/tests
 ```
 
 Run frontend lint:
@@ -185,7 +189,7 @@ mv data/app.db data/app.legacy.db
 Then split it into the current two-database layout:
 
 ```bash
-PYTHONPATH=backend backend/.venv/bin/python -m app.split_db --source data/app.legacy.db --replace
+uv run leetcoach-split-db --source data/app.legacy.db --replace
 ```
 
 After migration:
@@ -209,10 +213,10 @@ If you fork or deploy this project, generate your own local `catalog.db` and kee
 curl http://127.0.0.1:8000/api/health
 
 # import problems
-PYTHONPATH=backend backend/.venv/bin/python -m app.importer
+uv run leetcoach-import
 
 # backend
-backend/.venv/bin/uvicorn app.main:app --app-dir backend --reload --host 127.0.0.1 --port 8000
+uv run uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 # frontend
 npm run dev -- --port 5173

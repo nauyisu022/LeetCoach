@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Allotment, setSashSize } from "allotment";
 import "allotment/dist/style.css";
-import { BookMarked, BookOpen, Brain, PanelLeftOpen } from "lucide-react";
+import { BookMarked, BookOpen, Brain, Database, PanelLeftOpen } from "lucide-react";
 import { CoachPanel } from "./components/CoachPanel";
 import { EditorPanel } from "./components/EditorPanel";
+import { MemoryPanel } from "./components/MemoryPanel";
 import { NotesPanel } from "./components/NotesPanel";
 import { ProblemList } from "./components/ProblemList";
 import { ProblemPanel } from "./components/ProblemPanel";
 import { TestDock } from "./components/TestDock";
 import {
+  acceptAgentMemory,
   clearCoachThread,
   draftPracticeNote,
+  fetchAgentMemories,
   fetchCoachThread,
   fetchProblem,
   fetchProblems,
@@ -21,6 +24,7 @@ import {
   fetchPracticeQueue,
   fetchSubmissionHistory,
   fetchTopicMemories,
+  rejectAgentMemory,
   reviewPracticeNote,
   runCode,
   savePracticeNote,
@@ -28,9 +32,11 @@ import {
   streamCoachMessage,
   streamDiagnose,
   streamExplain,
-  submitCode
+  submitCode,
+  updateAgentMemory
 } from "./lib/api";
 import type {
+  AgentMemoryItem,
   CoachMessage,
   CustomTestCase,
   DisplaySubmissionResponse,
@@ -47,6 +53,7 @@ import type {
   ProgressSummary,
   SubmissionHistoryItem,
   SubmissionResponse,
+  ThinkingMode,
   TopicMemory
 } from "./types/api";
 
@@ -56,6 +63,7 @@ const AUTO_SAVE_DELAY_MS = 5000;
 const RUN_CASE_CONCURRENCY = 4;
 const FALLBACK_CUSTOM_INPUT = "nums = [2,7,11,15]\ntarget = 9";
 const SELECTED_TASK_STORAGE_KEY = "leetcoach:selected-task-id";
+const AI_THINKING_STORAGE_KEY = "leetcoach:ai-thinking-mode";
 
 type RunCaseResult = { case: CustomTestCase; response: SubmissionResponse };
 
@@ -146,6 +154,7 @@ export function App() {
   const [practiceInsights, setPracticeInsights] = useState<PracticeInsightsResponse>();
   const [practiceNoteResponse, setPracticeNoteResponse] = useState<PracticeNoteResponse>();
   const [topicMemories, setTopicMemories] = useState<TopicMemory[]>([]);
+  const [agentMemories, setAgentMemories] = useState<AgentMemoryItem[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(() => (
     window.localStorage.getItem(SELECTED_TASK_STORAGE_KEY) ?? undefined
   ));
@@ -158,24 +167,41 @@ export function App() {
   const [customCases, setCustomCases] = useState<CustomTestCase[]>(() => customCasesFromExamples([]));
   const [selectedCaseId, setSelectedCaseId] = useState("case-1");
   const [coachMessages, setCoachMessages] = useState<CoachMessage[]>([]);
+  const [thinkingMode, setThinkingMode] = useState<ThinkingMode>(() => (
+    window.localStorage.getItem(AI_THINKING_STORAGE_KEY) === "disabled" ? "disabled" : "enabled"
+  ));
   const [isRunning, setIsRunning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSavingSolution, setSavingSolution] = useState(false);
   const [isNoteLoading, setNoteLoading] = useState(false);
   const [isSavingNote, setSavingNote] = useState(false);
   const [isDraftingNote, setDraftingNote] = useState(false);
+  const [isMemoryLoading, setMemoryLoading] = useState(false);
+  const [updatingMemoryId, setUpdatingMemoryId] = useState<number | null>(null);
   const [solutionDirty, setSolutionDirty] = useState(false);
   const [solutionSavedAt, setSolutionSavedAt] = useState<string>();
   const [isCoachLoading, setCoachLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [isProblemDrawerOpen, setProblemDrawerOpen] = useState(false);
-  const [learningTab, setLearningTab] = useState<"coach" | "notes">("coach");
+  const [learningTab, setLearningTab] = useState<"coach" | "notes" | "memory">("coach");
   const [isCompactLayout, setCompactLayout] = useState(() => window.innerWidth < 1240);
   const testInputRef = useRef<HTMLTextAreaElement | null>(null);
   const draftRef = useRef<{ taskId?: string; code: string; dirty: boolean }>({ code: "", dirty: false });
   const autoSaveTimerRef = useRef<number | undefined>(undefined);
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
   const coachAbortRef = useRef<AbortController | null>(null);
+
+  const refreshAgentMemoryList = useCallback(async (taskId: string, options?: { showLoading?: boolean }) => {
+    if (options?.showLoading) setMemoryLoading(true);
+    try {
+      const response = await fetchAgentMemories(undefined, taskId);
+      setAgentMemories(response.memories);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      if (options?.showLoading) setMemoryLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     fetchProblems(filters)
@@ -217,6 +243,10 @@ export function App() {
       window.localStorage.removeItem(SELECTED_TASK_STORAGE_KEY);
     }
   }, [selectedTaskId]);
+
+  useEffect(() => {
+    window.localStorage.setItem(AI_THINKING_STORAGE_KEY, thinkingMode);
+  }, [thinkingMode]);
 
   useEffect(() => {
     fetchPracticeQueue(filters, selectedTaskId)
@@ -310,8 +340,17 @@ export function App() {
     };
   }, [selectedTaskId]);
 
+  useEffect(() => {
+    if (!selectedTaskId) {
+      setAgentMemories([]);
+      return;
+    }
+    void refreshAgentMemoryList(selectedTaskId, { showLoading: true });
+  }, [refreshAgentMemoryList, selectedTaskId]);
+
   const progressStats = useMemo(() => ({
     total: progressSummary?.total ?? 0,
+    completed: progressSummary?.passed ?? 0,
     todayPassed: progressSummary?.today_passed ?? 0,
     review: progressSummary?.needs_review ?? 0
   }), [progressSummary]);
@@ -519,7 +558,8 @@ export function App() {
       const target = event.target as HTMLElement | null;
       const isCoachInput = Boolean(target?.closest(".coach-panel"));
       const isNotesInput = Boolean(target?.closest(".notes-panel"));
-      const isLearningInput = isCoachInput || isNotesInput;
+      const isMemoryInput = Boolean(target?.closest(".memory-panel"));
+      const isLearningInput = isCoachInput || isNotesInput || isMemoryInput;
       const hasCommandModifier = event.ctrlKey || event.metaKey;
       if (hasCommandModifier && event.key.toLowerCase() === "s") {
         if (isLearningInput) return;
@@ -602,11 +642,13 @@ export function App() {
         problem.task_id,
         code,
         result?.id ?? undefined,
+        thinkingMode,
         (chunk) => appendCoachChunk(assistantId, chunk),
         controller.signal
       );
       const thread = await fetchCoachThread(problem.task_id);
       setCoachMessages(thread.messages);
+      void refreshAgentMemoryList(problem.task_id);
     } catch (err) {
       if (isAbortError(err)) {
         markCoachStopped(assistantId);
@@ -629,9 +671,10 @@ export function App() {
     const controller = new AbortController();
     coachAbortRef.current = controller;
     try {
-      await streamExplain(problem.task_id, (chunk) => appendCoachChunk(assistantId, chunk), controller.signal);
+      await streamExplain(problem.task_id, thinkingMode, (chunk) => appendCoachChunk(assistantId, chunk), controller.signal);
       const thread = await fetchCoachThread(problem.task_id);
       setCoachMessages(thread.messages);
+      void refreshAgentMemoryList(problem.task_id);
     } catch (err) {
       if (isAbortError(err)) {
         markCoachStopped(assistantId);
@@ -658,11 +701,13 @@ export function App() {
         message,
         code,
         result?.id ?? undefined,
+        thinkingMode,
         (chunk) => appendCoachChunk(assistantId, chunk),
         controller.signal
       );
       const thread = await fetchCoachThread(problem.task_id);
       setCoachMessages(thread.messages);
+      void refreshAgentMemoryList(problem.task_id);
     } catch (err) {
       if (isAbortError(err)) {
         markCoachStopped(assistantId);
@@ -739,6 +784,66 @@ export function App() {
     }
   }, [problem]);
 
+  const handleMemoryAccept = useCallback(async (memoryId: number) => {
+    if (!problem) return;
+    setUpdatingMemoryId(memoryId);
+    setError(undefined);
+    try {
+      await acceptAgentMemory(memoryId);
+      await refreshAgentMemoryList(problem.task_id);
+    } catch (err) {
+      setError((err as Error).message);
+      throw err;
+    } finally {
+      setUpdatingMemoryId(null);
+    }
+  }, [problem, refreshAgentMemoryList]);
+
+  const handleMemoryReject = useCallback(async (memoryId: number) => {
+    if (!problem) return;
+    setUpdatingMemoryId(memoryId);
+    setError(undefined);
+    try {
+      await rejectAgentMemory(memoryId);
+      await refreshAgentMemoryList(problem.task_id);
+    } catch (err) {
+      setError((err as Error).message);
+      throw err;
+    } finally {
+      setUpdatingMemoryId(null);
+    }
+  }, [problem, refreshAgentMemoryList]);
+
+  const handleMemoryArchive = useCallback(async (memoryId: number) => {
+    if (!problem) return;
+    setUpdatingMemoryId(memoryId);
+    setError(undefined);
+    try {
+      await updateAgentMemory(memoryId, { status: "archived" });
+      await refreshAgentMemoryList(problem.task_id);
+    } catch (err) {
+      setError((err as Error).message);
+      throw err;
+    } finally {
+      setUpdatingMemoryId(null);
+    }
+  }, [problem, refreshAgentMemoryList]);
+
+  const handleMemorySave = useCallback(async (memoryId: number, content: string) => {
+    if (!problem) return;
+    setUpdatingMemoryId(memoryId);
+    setError(undefined);
+    try {
+      await updateAgentMemory(memoryId, { content });
+      await refreshAgentMemoryList(problem.task_id);
+    } catch (err) {
+      setError((err as Error).message);
+      throw err;
+    } finally {
+      setUpdatingMemoryId(null);
+    }
+  }, [problem, refreshAgentMemoryList]);
+
   const layoutKey = isCompactLayout ? "compact-allotment-v2" : "desktop-allotment-v2";
   const outerSizes = isCompactLayout ? [120, 460, 140] : [520, 760, 420];
   const editorSizes = isCompactLayout ? [180, 280] : [470, 310];
@@ -779,6 +884,10 @@ export function App() {
             <span title={`题库总数 ${progressStats.total}`} aria-label={`题库总数 ${progressStats.total}`}>
               <strong>{progressStats.total}</strong>
               <small>总题</small>
+            </span>
+            <span title={`总共完成 ${progressStats.completed}`} aria-label={`总共完成 ${progressStats.completed}`}>
+              <strong>{progressStats.completed}</strong>
+              <small>完成</small>
             </span>
             <span title={`今日通过 ${progressStats.todayPassed}`} aria-label={`今日通过 ${progressStats.todayPassed}`}>
               <strong>{progressStats.todayPassed}</strong>
@@ -872,27 +981,39 @@ export function App() {
                     <Brain size={15} />
                     AI 教练
                   </button>
-                  <button
-                    className={learningTab === "notes" ? "active" : ""}
-                    type="button"
-                    role="tab"
-                    aria-selected={learningTab === "notes"}
-                    onClick={() => setLearningTab("notes")}
-                  >
-                    <BookMarked size={15} />
-                    Notes
-                  </button>
-                </div>
+	                  <button
+	                    className={learningTab === "notes" ? "active" : ""}
+	                    type="button"
+	                    role="tab"
+	                    aria-selected={learningTab === "notes"}
+	                    onClick={() => setLearningTab("notes")}
+	                  >
+	                    <BookMarked size={15} />
+	                    Notes
+	                  </button>
+	                  <button
+	                    className={learningTab === "memory" ? "active" : ""}
+	                    type="button"
+	                    role="tab"
+	                    aria-selected={learningTab === "memory"}
+	                    onClick={() => setLearningTab("memory")}
+	                  >
+	                    <Database size={15} />
+	                    Memory
+	                  </button>
+	                </div>
                 <div className="learning-content">
                   <div className={`learning-content-pane ${learningTab === "coach" ? "active" : ""}`} aria-hidden={learningTab !== "coach"}>
                     <CoachPanel
                       messages={coachMessages}
                       isLoading={isCoachLoading}
                       onExplain={handleExplain}
-                      onDiagnose={handleDiagnose}
-                      onSend={handleCoachSend}
-                      onClear={handleCoachClear}
-                    />
+	                      onDiagnose={handleDiagnose}
+	                      onSend={handleCoachSend}
+	                      onClear={handleCoachClear}
+	                      thinkingMode={thinkingMode}
+	                      onThinkingModeChange={setThinkingMode}
+	                    />
                   </div>
                   <div className={`learning-content-pane ${learningTab === "notes" ? "active" : ""}`} aria-hidden={learningTab !== "notes"}>
                     <NotesPanel
@@ -905,10 +1026,22 @@ export function App() {
                       isDrafting={isDraftingNote}
                       onSave={handlePracticeNoteSave}
                       onDraft={handlePracticeNoteDraft}
-                      onReview={handlePracticeNoteReview}
-                    />
-                  </div>
-                </div>
+	                      onReview={handlePracticeNoteReview}
+	                    />
+	                  </div>
+	                  <div className={`learning-content-pane ${learningTab === "memory" ? "active" : ""}`} aria-hidden={learningTab !== "memory"}>
+	                    <MemoryPanel
+	                      problem={problem}
+	                      memories={agentMemories}
+	                      isLoading={isMemoryLoading}
+	                      updatingMemoryId={updatingMemoryId}
+	                      onAccept={handleMemoryAccept}
+	                      onReject={handleMemoryReject}
+	                      onArchive={handleMemoryArchive}
+	                      onSave={handleMemorySave}
+	                    />
+	                  </div>
+	                </div>
               </section>
             </div>
           </Allotment.Pane>

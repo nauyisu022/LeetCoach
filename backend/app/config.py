@@ -53,6 +53,10 @@ def anthropic_model() -> str:
     return os.getenv("ANTHROPIC_MODEL", "claude-3-5-sonnet-latest")
 
 
+def ai_thinking_mode() -> str:
+    return os.getenv("LEETCOACH_AI_THINKING", "auto").strip().lower()
+
+
 def anthropic_base_url() -> str | None:
     return os.getenv("ANTHROPIC_BASE_URL")
 
@@ -63,4 +67,3 @@ def anthropic_api_key() -> str | None:
 
 def anthropic_auth_token() -> str | None:
     return os.getenv("ANTHROPIC_AUTH_TOKEN")
-

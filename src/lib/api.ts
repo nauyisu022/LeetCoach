@@ -1,4 +1,8 @@
 import type {
+  AgentMemoryItem,
+  AgentMemoryListResponse,
+  AgentMemoryStatus,
+  AgentMemoryUpdateRequest,
   CoachMessage,
   Filters,
   PracticeInsightsResponse,
@@ -14,6 +18,7 @@ import type {
   SavedSolution,
   SubmissionHistoryItem,
   SubmissionResponse,
+  ThinkingMode,
   TopicMemoryListResponse
 } from "../types/api";
 
@@ -181,6 +186,29 @@ export function fetchTopicMemories(): Promise<TopicMemoryListResponse> {
   return request("/api/topic-memories");
 }
 
+export function fetchAgentMemories(status?: AgentMemoryStatus, taskId?: string): Promise<AgentMemoryListResponse> {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (taskId) params.set("task_id", taskId);
+  const suffix = params.toString();
+  return request(`/api/agent/memories${suffix ? `?${suffix}` : ""}`);
+}
+
+export function updateAgentMemory(memoryId: number, payload: AgentMemoryUpdateRequest): Promise<AgentMemoryItem> {
+  return request(`/api/agent/memories/${memoryId}`, {
+    method: "PUT",
+    body: JSON.stringify(payload)
+  });
+}
+
+export function acceptAgentMemory(memoryId: number): Promise<AgentMemoryItem> {
+  return request(`/api/agent/memories/${memoryId}/accept`, { method: "POST" });
+}
+
+export function rejectAgentMemory(memoryId: number): Promise<AgentMemoryItem> {
+  return request(`/api/agent/memories/${memoryId}/reject`, { method: "POST" });
+}
+
 export function fetchProblem(taskId: string): Promise<ProblemDetail> {
   return request(`/api/problems/${taskId}`);
 }
@@ -219,6 +247,7 @@ export function streamDiagnose(
   taskId: string,
   code: string,
   submissionId: number | undefined,
+  thinkingMode: ThinkingMode,
   onChunk: (chunk: string) => void,
   signal?: AbortSignal
 ): Promise<string> {
@@ -227,19 +256,24 @@ export function streamDiagnose(
     {
       method: "POST",
       signal,
-      body: JSON.stringify({ task_id: taskId, code, submission_id: submissionId })
+      body: JSON.stringify({ task_id: taskId, code, submission_id: submissionId, thinking_mode: thinkingMode })
     },
     onChunk
   );
 }
 
-export function streamExplain(taskId: string, onChunk: (chunk: string) => void, signal?: AbortSignal): Promise<string> {
+export function streamExplain(
+  taskId: string,
+  thinkingMode: ThinkingMode,
+  onChunk: (chunk: string) => void,
+  signal?: AbortSignal
+): Promise<string> {
   return streamRequest(
     "/api/coach/explain/stream",
     {
       method: "POST",
       signal,
-      body: JSON.stringify({ task_id: taskId })
+      body: JSON.stringify({ task_id: taskId, thinking_mode: thinkingMode })
     },
     onChunk
   );
@@ -258,6 +292,7 @@ export function streamCoachMessage(
   message: string,
   code: string,
   submissionId: number | undefined,
+  thinkingMode: ThinkingMode,
   onChunk: (chunk: string) => void,
   signal?: AbortSignal
 ): Promise<string> {
@@ -266,7 +301,7 @@ export function streamCoachMessage(
     {
       method: "POST",
       signal,
-      body: JSON.stringify({ task_id: taskId, message, code, submission_id: submissionId })
+      body: JSON.stringify({ task_id: taskId, message, code, submission_id: submissionId, thinking_mode: thinkingMode })
     },
     onChunk
   );

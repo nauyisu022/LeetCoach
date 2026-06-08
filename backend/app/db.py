@@ -246,6 +246,59 @@ def _init_user_db(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS {USER_DB_ALIAS}.idx_review_events_user_note
           ON review_events(user_id, note_id, reviewed_at);
+
+        CREATE TABLE IF NOT EXISTS {USER_DB_ALIAS}.learning_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            task_id TEXT,
+            topic TEXT,
+            event_type TEXT NOT NULL CHECK(event_type IN ('mistake', 'insight', 'confusion', 'preference', 'mastery', 'review_need')),
+            content TEXT NOT NULL,
+            evidence_message_ids TEXT NOT NULL DEFAULT '[]',
+            confidence REAL NOT NULL DEFAULT 0.5,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS {USER_DB_ALIAS}.idx_learning_events_user_task
+          ON learning_events(user_id, task_id, created_at);
+        CREATE INDEX IF NOT EXISTS {USER_DB_ALIAS}.idx_learning_events_user_topic
+          ON learning_events(user_id, topic, created_at);
+
+        CREATE TABLE IF NOT EXISTS {USER_DB_ALIAS}.user_memory_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            memory_type TEXT NOT NULL CHECK(memory_type IN ('preference', 'weakness', 'strength', 'habit', 'goal', 'strategy')),
+            scope TEXT NOT NULL CHECK(scope IN ('global', 'topic', 'task')),
+            topic TEXT,
+            task_id TEXT,
+            content TEXT NOT NULL,
+            source TEXT NOT NULL,
+            confidence REAL NOT NULL DEFAULT 0.5,
+            status TEXT NOT NULL CHECK(status IN ('proposed', 'accepted', 'rejected', 'archived')),
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS {USER_DB_ALIAS}.idx_user_memory_items_user_status
+          ON user_memory_items(user_id, status, updated_at);
+        CREATE INDEX IF NOT EXISTS {USER_DB_ALIAS}.idx_user_memory_items_user_task
+          ON user_memory_items(user_id, task_id, status);
+        CREATE INDEX IF NOT EXISTS {USER_DB_ALIAS}.idx_user_memory_items_user_topic
+          ON user_memory_items(user_id, topic, status);
+
+        CREATE TABLE IF NOT EXISTS {USER_DB_ALIAS}.coach_thread_summaries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            task_id TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            last_message_id INTEGER,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(user_id, task_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS {USER_DB_ALIAS}.idx_coach_thread_summaries_user_task
+          ON coach_thread_summaries(user_id, task_id);
         """
     )
 

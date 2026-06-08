@@ -27,6 +27,9 @@ def test_schema_initializes(tmp_path: Path):
         "practice_note_topics",
         "topic_memories",
         "review_events",
+        "learning_events",
+        "user_memory_items",
+        "coach_thread_summaries",
     }.issubset(user_tables)
     assert {
         "problems",
@@ -38,6 +41,9 @@ def test_schema_initializes(tmp_path: Path):
         "practice_note_topics",
         "topic_memories",
         "review_events",
+        "learning_events",
+        "user_memory_items",
+        "coach_thread_summaries",
     }.issubset(catalog_tables | user_tables)
     user = conn.execute("SELECT id FROM users WHERE id = 'local'").fetchone()
     submission_columns = {

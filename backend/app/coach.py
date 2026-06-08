@@ -4,7 +4,7 @@ from collections.abc import Iterator
 
 from anthropic import Anthropic
 
-from .config import anthropic_api_key, anthropic_auth_token, anthropic_base_url, anthropic_model
+from .config import ai_thinking_mode, anthropic_api_key, anthropic_auth_token, anthropic_base_url, anthropic_model
 
 
 SYSTEM_PROMPT = """你是一个算法题学习教练。默认用中文，目标是帮助学习者理解范式，而不是只给答案。
@@ -21,7 +21,7 @@ def call_claude_messages(messages: list[dict[str, str]]) -> str:
     return text or "AI 没有返回内容。请稍后重试，或检查当前模型/API 配置。"
 
 
-def call_claude_messages_stream(messages: list[dict[str, str]]) -> Iterator[str]:
+def call_claude_messages_stream(messages: list[dict[str, str]], thinking_mode: str | None = None) -> Iterator[str]:
     api_key = anthropic_api_key()
     auth_token = anthropic_auth_token()
     if not api_key and not auth_token:
@@ -34,17 +34,27 @@ def call_claude_messages_stream(messages: list[dict[str, str]]) -> Iterator[str]
         max_tokens=1800,
         system=SYSTEM_PROMPT,
         messages=messages,
-        extra_body=_provider_extra_body(),
+        extra_body=_provider_extra_body(thinking_mode),
     ) as stream:
         for text in stream.text_stream:
             if text:
                 yield text
 
 
-def _provider_extra_body() -> dict | None:
+def _provider_extra_body(thinking_mode: str | None = None) -> dict | None:
     base_url = anthropic_base_url() or ""
-    if "deepseek" in base_url.lower():
-        return {"thinking": {"type": "disabled"}}
+    if "deepseek" not in base_url.lower():
+        return None
+
+    mode = (thinking_mode or ai_thinking_mode()).strip().lower()
+    if mode in {"off", "false", "0"}:
+        mode = "disabled"
+    if mode in {"on", "true", "1"}:
+        mode = "enabled"
+    if mode == "auto":
+        mode = "enabled"
+    if mode in {"enabled", "disabled"}:
+        return {"thinking": {"type": mode}}
     return None
 
 
@@ -155,6 +165,7 @@ def _practice_section(problem: dict) -> str:
         return ""
     weak_topics = context.get("weak_topics") or []
     next_items = context.get("same_topic_next") or []
+    accepted_memories = context.get("accepted_memories") or []
     lines: list[str] = []
     if weak_topics:
         lines.append("练习画像:")
@@ -162,6 +173,12 @@ def _practice_section(problem: dict) -> str:
             lines.append(
                 f"- {topic['label']}: 已过 {topic['passed_count']}/{topic['total_problem_count']}，{topic['recommendation']}"
             )
+    if accepted_memories:
+        lines.append("已确认的学习记忆:")
+        for memory in accepted_memories[:6]:
+            scope = memory.get("scope", "memory")
+            content = memory.get("content", "")
+            lines.append(f"- [{scope}] {content}")
     if next_items:
         lines.append("同考点后续练习:")
         for item in next_items[:3]:

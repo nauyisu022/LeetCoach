@@ -5,15 +5,23 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
+from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 
+from .agent_runtime.memory import (
+    fetch_accepted_memories_for_context,
+    fetch_memory_items,
+    fetch_thread_summary,
+    memory_rows_for_prompt,
+    run_after_coach_response_hook,
+    set_memory_status,
+    update_memory_item,
+)
+from .agent_runtime.runtime import build_command_plan, enrich_problem_with_memories, normalize_command
 from .coach import (
-    build_chat_context,
-    build_diagnose_prompt,
-    build_explain_prompt,
     build_note_draft_prompt,
     call_claude,
     call_claude_messages_stream,
@@ -32,6 +40,11 @@ from .notes import (
 )
 from .practice import PracticeFilters, fetch_practice_queue, fetch_topic_insights, practice_reason, topic_names_for_problem
 from .schemas import (
+    AgentCommandRequest,
+    AgentMemoryItem,
+    AgentMemoryListResponse,
+    AgentMemoryUpdateRequest,
+    AgentThreadSummaryResponse,
     CoachChatRequest,
     CoachMessage,
     CoachRequest,
@@ -119,11 +132,11 @@ def problem_image(url: str) -> Response:
 
 @app.get("/api/problems", response_model=list[ProblemSummary])
 def list_problems(
-    difficulty: str | None = None,
-    tag: str | None = None,
-    tags: list[str] | None = Query(None),
-    status: str | None = None,
-    search: str | None = None,
+    difficulty: Optional[str] = None,
+    tag: Optional[str] = None,
+    tags: Optional[list[str]] = Query(None),
+    status: Optional[str] = None,
+    search: Optional[str] = None,
     limit: int = Query(3000, ge=1, le=5000),
 ) -> list[ProblemSummary]:
     clauses: list[str] = []
@@ -297,11 +310,11 @@ def list_problem_tags() -> list[ProblemTag]:
 
 @app.get("/api/practice/queue", response_model=PracticeQueueResponse)
 def practice_queue(
-    tags: list[str] | None = Query(None),
-    current_task_id: str | None = None,
-    difficulty: str | None = None,
-    status: str | None = None,
-    search: str | None = None,
+    tags: Optional[list[str]] = Query(None),
+    current_task_id: Optional[str] = None,
+    difficulty: Optional[str] = None,
+    status: Optional[str] = None,
+    search: Optional[str] = None,
     limit: int = Query(30, ge=1, le=100),
 ) -> PracticeQueueResponse:
     filters = PracticeFilters(
@@ -319,8 +332,8 @@ def practice_queue(
 @app.get("/api/practice/next", response_model=PracticeQueueResponse)
 def practice_next(
     current_task_id: str,
-    tags: list[str] | None = Query(None),
-    difficulty: str | None = None,
+    tags: Optional[list[str]] = Query(None),
+    difficulty: Optional[str] = None,
 ) -> PracticeQueueResponse:
     filters = PracticeFilters(
         user_id=DEFAULT_USER_ID,
@@ -351,6 +364,74 @@ def topic_memories(limit: int = Query(20, ge=1, le=80)) -> TopicMemoryListRespon
     rows = fetch_topic_memories(conn, user_id=DEFAULT_USER_ID, limit=limit)
     conn.close()
     return TopicMemoryListResponse(memories=[_topic_memory_from_row(row) for row in rows])
+
+
+@app.get("/api/agent/memories", response_model=AgentMemoryListResponse)
+def agent_memories(
+    status: Optional[str] = None,
+    task_id: Optional[str] = None,
+    limit: int = Query(80, ge=1, le=200),
+) -> AgentMemoryListResponse:
+    conn = get_connection()
+    try:
+        rows = fetch_memory_items(conn, user_id=DEFAULT_USER_ID, status=status, task_id=task_id, limit=limit)
+    except ValueError as exc:
+        conn.close()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    conn.close()
+    return AgentMemoryListResponse(memories=[_agent_memory_item_from_row(row) for row in rows])
+
+
+@app.put("/api/agent/memories/{memory_id}", response_model=AgentMemoryItem)
+def update_agent_memory(memory_id: int, request: AgentMemoryUpdateRequest) -> AgentMemoryItem:
+    conn = get_connection()
+    try:
+        with conn:
+            row = update_memory_item(
+                conn,
+                user_id=DEFAULT_USER_ID,
+                memory_id=memory_id,
+                content=request.content,
+                status=request.status,
+            )
+    except ValueError as exc:
+        conn.close()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return _agent_memory_item_from_row(row)
+
+
+@app.post("/api/agent/memories/{memory_id}/accept", response_model=AgentMemoryItem)
+def accept_agent_memory(memory_id: int) -> AgentMemoryItem:
+    return _set_agent_memory_status(memory_id, "accepted")
+
+
+@app.post("/api/agent/memories/{memory_id}/reject", response_model=AgentMemoryItem)
+def reject_agent_memory(memory_id: int) -> AgentMemoryItem:
+    return _set_agent_memory_status(memory_id, "rejected")
+
+
+@app.get("/api/agent/thread-summary/{task_id}", response_model=AgentThreadSummaryResponse)
+def get_agent_thread_summary(task_id: str) -> AgentThreadSummaryResponse:
+    _fetch_problem_row(task_id)
+    conn = get_connection()
+    row = fetch_thread_summary(conn, user_id=DEFAULT_USER_ID, task_id=task_id)
+    conn.close()
+    if not row:
+        return AgentThreadSummaryResponse(task_id=task_id, summary=None)
+    return AgentThreadSummaryResponse(
+        task_id=task_id,
+        summary=row["summary"],
+        last_message_id=row["last_message_id"],
+        updated_at=row["updated_at"],
+    )
+
+
+@app.post("/api/agent/command/stream")
+def agent_command_stream(request: AgentCommandRequest) -> StreamingResponse:
+    return _agent_command_stream_response(request)
 
 
 @app.get("/api/problems/{task_id}/note", response_model=PracticeNoteResponse)
@@ -580,14 +661,14 @@ def diagnose(request: CoachRequest) -> CoachResponse:
 
 @app.post("/api/coach/diagnose/stream")
 def diagnose_stream(request: CoachRequest) -> StreamingResponse:
-    problem = _problem_payload(_fetch_problem_row(request.task_id))
-    code, failure = _submission_context(request.task_id, request.code, request.submission_id)
-    prompt = build_diagnose_prompt(problem, code, failure)
-    return _stream_coach_response(
-        task_id=request.task_id,
-        user_content="请诊断我这次提交为什么失败。",
-        messages=[{"role": "user", "content": prompt}],
-        submission_id=request.submission_id,
+    return _agent_command_stream_response(
+        AgentCommandRequest(
+            task_id=request.task_id,
+            command="/diagnose",
+            code=request.code,
+            submission_id=request.submission_id,
+            thinking_mode=request.thinking_mode,
+        )
     )
 
 
@@ -598,11 +679,14 @@ def explain(request: CoachRequest) -> CoachResponse:
 
 @app.post("/api/coach/explain/stream")
 def explain_stream(request: CoachRequest) -> StreamingResponse:
-    problem = _problem_payload(_fetch_problem_row(request.task_id))
-    return _stream_coach_response(
-        task_id=request.task_id,
-        user_content="请完整讲解这道题，并总结解法范式。",
-        messages=[{"role": "user", "content": build_explain_prompt(problem)}],
+    return _agent_command_stream_response(
+        AgentCommandRequest(
+            task_id=request.task_id,
+            command="/explain",
+            code=request.code,
+            submission_id=request.submission_id,
+            thinking_mode=request.thinking_mode,
+        )
     )
 
 
@@ -634,6 +718,7 @@ def clear_coach_thread(task_id: str) -> dict[str, str]:
     conn = get_connection()
     with conn:
         conn.execute("DELETE FROM coach_messages WHERE user_id = ? AND task_id = ?", (DEFAULT_USER_ID, task_id))
+        conn.execute("DELETE FROM coach_thread_summaries WHERE user_id = ? AND task_id = ?", (DEFAULT_USER_ID, task_id))
     conn.close()
     return {"status": "cleared"}
 
@@ -643,41 +728,58 @@ def coach_chat(request: CoachChatRequest) -> CoachResponse:
     raise HTTPException(status_code=410, detail="Use /api/coach/chat/stream")
 
 
-def _coach_chat_messages(
-    task_id: str,
-    problem: dict[str, Any],
-    code: str | None,
-    failure: dict[str, Any] | None,
-    message: str,
-) -> list[dict[str, str]]:
-    conn = get_connection()
-    previous = conn.execute(
-        """
-        SELECT role, content
-        FROM coach_messages
-        WHERE user_id = ? AND task_id = ?
-        ORDER BY id DESC
-        LIMIT 12
-        """,
-        (DEFAULT_USER_ID, task_id),
-    ).fetchall()
-    conn.close()
-    history = [{"role": row["role"], "content": row["content"]} for row in reversed(previous)]
-    return [
-        *history,
-        {"role": "user", "content": f"{build_chat_context(problem, code, failure)}\n\n用户问题：{message}"},
-    ]
-
-
 @app.post("/api/coach/chat/stream")
 def coach_chat_stream(request: CoachChatRequest) -> StreamingResponse:
-    problem = _problem_payload(_fetch_problem_row(request.task_id))
+    return _agent_command_stream_response(
+        AgentCommandRequest(
+            task_id=request.task_id,
+            command="auto",
+            message=request.message,
+            code=request.code,
+            submission_id=request.submission_id,
+            thinking_mode=request.thinking_mode,
+        )
+    )
+
+
+def _agent_command_stream_response(request: AgentCommandRequest) -> StreamingResponse:
+    row = _fetch_problem_row(request.task_id)
+    problem = _problem_payload(row)
+    command = normalize_command(request.command, request.message)
     code, failure = _submission_context(request.task_id, request.code, request.submission_id)
-    messages = _coach_chat_messages(request.task_id, problem, code, failure, request.message)
+    conn = get_connection()
+    topics = [*topic_names_for_problem(conn, request.task_id), *(problem.get("tags") or [])]
+    memories = memory_rows_for_prompt(
+        fetch_accepted_memories_for_context(
+            conn,
+            user_id=DEFAULT_USER_ID,
+            task_id=request.task_id,
+            topics=topics,
+        )
+    )
+    history = _coach_history(conn, request.task_id)
+    conn.close()
+    enriched_problem = enrich_problem_with_memories(problem, memories)
+    try:
+        plan = build_command_plan(
+            command=command,
+            task_id=request.task_id,
+            problem=enriched_problem,
+            code=code,
+            failure=failure,
+            message=request.message,
+            history=history,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return _stream_coach_response(
         task_id=request.task_id,
-        user_content=request.message,
-        messages=messages,
+        user_content=plan.user_content,
+        messages=plan.messages,
+        command=plan.command,
+        problem=enriched_problem,
+        submission_id=request.submission_id,
+        thinking_mode=request.thinking_mode,
     )
 
 
@@ -824,6 +926,47 @@ def _topic_memory_from_row(row) -> TopicMemory:
     )
 
 
+def _agent_memory_item_from_row(row) -> AgentMemoryItem:
+    return AgentMemoryItem(
+        id=row["id"],
+        user_id=row["user_id"],
+        memory_type=row["memory_type"],
+        scope=row["scope"],
+        topic=row["topic"],
+        task_id=row["task_id"],
+        content=row["content"],
+        source=row["source"],
+        confidence=row["confidence"],
+        status=row["status"],
+        created_at=row["created_at"],
+        updated_at=row["updated_at"],
+    )
+
+
+def _set_agent_memory_status(memory_id: int, status: str) -> AgentMemoryItem:
+    conn = get_connection()
+    with conn:
+        row = set_memory_status(conn, user_id=DEFAULT_USER_ID, memory_id=memory_id, status=status)
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Memory not found")
+    return _agent_memory_item_from_row(row)
+
+
+def _coach_history(conn, task_id: str, limit: int = 12) -> list[dict[str, str]]:
+    rows = conn.execute(
+        """
+        SELECT role, content
+        FROM coach_messages
+        WHERE user_id = ? AND task_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (DEFAULT_USER_ID, task_id, limit),
+    ).fetchall()
+    return [{"role": row["role"], "content": row["content"]} for row in reversed(rows)]
+
+
 def _ensure_chinese_titles(conn, rows) -> None:
     missing = [row["task_id"] for row in rows if not row["title_zh"]]
     if not missing:
@@ -854,7 +997,7 @@ def _problem_detail(row) -> ProblemDetail:
     )
 
 
-def _saved_solution_from_problem_row(row) -> SavedSolution | None:
+def _saved_solution_from_problem_row(row) -> Optional[SavedSolution]:
     if row["saved_solution_id"] is None:
         return None
     return SavedSolution(
@@ -888,7 +1031,7 @@ def _upsert_saved_solution(
     task_id: str,
     code: str,
     language: str = "python",
-    notes: str | None = None,
+    notes: Optional[str] = None,
     user_id: str = DEFAULT_USER_ID,
 ) -> SavedSolution:
     conn.execute(
@@ -967,8 +1110,8 @@ def _practice_context(task_id: str) -> dict[str, Any]:
     }
 
 
-def _submission_context(task_id: str, code: str | None, submission_id: int | None) -> tuple[str, dict[str, Any] | None]:
-    failure: dict[str, Any] | None = None
+def _submission_context(task_id: str, code: Optional[str], submission_id: Optional[int]) -> tuple[str, Optional[dict[str, Any]]]:
+    failure: Optional[dict[str, Any]] = None
     resolved_code = code or ""
     conn = get_connection()
     submission = None
@@ -995,7 +1138,7 @@ def _submission_context(task_id: str, code: str | None, submission_id: int | Non
 
 
 def _submission_response(
-    submission_id: int | None,
+    submission_id: Optional[int],
     task_id: str,
     mode: str,
     result: Any,
@@ -1042,14 +1185,16 @@ def _format_ms(value: int) -> str:
     return "<1 ms" if value <= 0 else f"{value} ms"
 
 
-def _append_coach_message(task_id: str, role: str, content: str) -> None:
+def _append_coach_message(task_id: str, role: str, content: str) -> int:
     conn = get_connection()
     with conn:
-        conn.execute(
+        cursor = conn.execute(
             "INSERT INTO coach_messages (user_id, task_id, role, content) VALUES (?, ?, ?, ?)",
             (DEFAULT_USER_ID, task_id, role, content),
         )
+        message_id = int(cursor.lastrowid)
     conn.close()
+    return message_id
 
 
 def _stream_coach_response(
@@ -1057,11 +1202,14 @@ def _stream_coach_response(
     task_id: str,
     user_content: str,
     messages: list[dict[str, str]],
-    submission_id: int | None = None,
+    command: str = "auto",
+    problem: Optional[dict[str, Any]] = None,
+    submission_id: Optional[int] = None,
+    thinking_mode: Optional[str] = None,
 ) -> StreamingResponse:
     def generate():
         chunks: list[str] = []
-        for chunk in call_claude_messages_stream(messages):
+        for chunk in call_claude_messages_stream(messages, thinking_mode=thinking_mode):
             chunks.append(chunk)
             yield chunk
 
@@ -1069,8 +1217,22 @@ def _stream_coach_response(
         if not text:
             text = "AI 没有返回内容。请稍后重试，或检查当前模型/API 配置。"
             yield text
-        _append_coach_message(task_id, "user", user_content)
-        _append_coach_message(task_id, "assistant", text)
+        user_message_id = _append_coach_message(task_id, "user", user_content)
+        assistant_message_id = _append_coach_message(task_id, "assistant", text)
+        conn = get_connection()
+        with conn:
+            run_after_coach_response_hook(
+                conn,
+                user_id=DEFAULT_USER_ID,
+                task_id=task_id,
+                command=command,
+                problem=problem or {"task_id": task_id},
+                user_content=user_content,
+                assistant_text=text,
+                user_message_id=user_message_id,
+                assistant_message_id=assistant_message_id,
+            )
+        conn.close()
         if submission_id:
             conn = get_connection()
             with conn:

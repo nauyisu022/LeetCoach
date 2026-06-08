@@ -23,6 +23,9 @@ USER_TABLES = (
     "practice_note_topics",
     "topic_memories",
     "review_events",
+    "learning_events",
+    "user_memory_items",
+    "coach_thread_summaries",
 )
 
 

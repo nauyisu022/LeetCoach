@@ -1,0 +1,28 @@
+[project]
+name = "leetcoach"
+version = "0.1.0"
+description = "Local coding-practice workbench for LeetCode-style problems."
+requires-python = ">=3.11"
+dependencies = [
+    "anthropic==0.45.2",
+    "fastapi==0.115.6",
+    "httpx==0.28.1",
+    "pydantic==2.10.4",
+    "pytest==8.3.4",
+    "sortedcontainers==2.4.0",
+    "uvicorn[standard]==0.34.0",
+]
+
+[project.scripts]
+leetcoach-import = "app.importer:main"
+leetcoach-codetop = "app.codetop:main"
+leetcoach-codetop-gap = "app.codetop_gap:main"
+leetcoach-split-db = "app.split_db:main"
+
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "backend"}
+packages = ["app"]

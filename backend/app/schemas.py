@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from typing import Optional
 
 from pydantic import BaseModel
 
@@ -14,9 +15,9 @@ class ProblemSummary(BaseModel):
     status: str
     submit_count: int
     pass_count: int
-    last_submitted_at: str | None
-    codetop_frequency: int | None = None
-    codetop_last_asked_at: str | None = None
+    last_submitted_at: Optional[str]
+    codetop_frequency: Optional[int] = None
+    codetop_last_asked_at: Optional[str] = None
 
 
 class ProgressSummary(BaseModel):
@@ -35,7 +36,7 @@ class PracticeQueueResponse(BaseModel):
     active_topics: list[str]
     strategy: str
     items: list[PracticeQueueItem]
-    next_task_id: str | None
+    next_task_id: Optional[str]
 
 
 class PracticeTopicInsight(BaseModel):
@@ -54,7 +55,7 @@ class PracticeTopicInsight(BaseModel):
     progress: float
     priority_score: float
     recommendation: str
-    next_task_id: str | None
+    next_task_id: Optional[str]
 
 
 class PracticeInsightsResponse(BaseModel):
@@ -77,7 +78,7 @@ class SavedSolution(BaseModel):
     task_id: str
     code: str
     language: str
-    notes: str | None
+    notes: Optional[str]
     created_at: str
     updated_at: str
 
@@ -87,41 +88,41 @@ class PracticeNote(BaseModel):
     user_id: str
     task_id: str
     content_markdown: str
-    ai_summary: str | None
-    mistake_summary: str | None
-    invariant_summary: str | None
-    solution_pattern: str | None
-    source_submission_id: int | None
-    review_at: str | None
+    ai_summary: Optional[str]
+    mistake_summary: Optional[str]
+    invariant_summary: Optional[str]
+    solution_pattern: Optional[str]
+    source_submission_id: Optional[int]
+    review_at: Optional[str]
     topics: list[str]
     created_at: str
     updated_at: str
 
 
 class PracticeNoteResponse(BaseModel):
-    note: PracticeNote | None
+    note: Optional[PracticeNote]
     suggested_topics: list[str]
 
 
 class PracticeNoteSaveRequest(BaseModel):
     content_markdown: str
-    ai_summary: str | None = None
-    mistake_summary: str | None = None
-    invariant_summary: str | None = None
-    solution_pattern: str | None = None
-    source_submission_id: int | None = None
-    review_at: str | None = None
-    topics: list[str] | None = None
+    ai_summary: Optional[str] = None
+    mistake_summary: Optional[str] = None
+    invariant_summary: Optional[str] = None
+    solution_pattern: Optional[str] = None
+    source_submission_id: Optional[int] = None
+    review_at: Optional[str] = None
+    topics: Optional[list[str]] = None
 
 
 class PracticeNoteDraftRequest(BaseModel):
-    code: str | None = None
-    submission_id: int | None = None
+    code: Optional[str] = None
+    submission_id: Optional[int] = None
 
 
 class PracticeNoteDraftResponse(BaseModel):
     content_markdown: str
-    source_submission_id: int | None
+    source_submission_id: Optional[int]
     topics: list[str]
 
 
@@ -160,36 +161,36 @@ class ProblemDetail(ProblemSummary):
     starter_code: str
     entry_point: str
     input_output: list[dict[str, Any]]
-    saved_solution: SavedSolution | None = None
+    saved_solution: Optional[SavedSolution] = None
 
 
 class SubmissionRequest(BaseModel):
     task_id: str
     code: str
-    custom_input: str | None = None
-    custom_expected_output: str | None = None
+    custom_input: Optional[str] = None
+    custom_expected_output: Optional[str] = None
 
 
 class SaveSolutionRequest(BaseModel):
     code: str
     language: str = "python"
-    notes: str | None = None
+    notes: Optional[str] = None
 
 
 class SubmissionResponse(BaseModel):
-    id: int | None
+    id: Optional[int]
     task_id: str
     mode: str
     status: str
     title: str
     summary: str
     passed: bool
-    failed_assertion: str | None
-    stderr: str | None
-    stdout: str | None
-    return_output: str | None = None
+    failed_assertion: Optional[str]
+    stderr: Optional[str]
+    stdout: Optional[str]
+    return_output: Optional[str] = None
     runtime_ms: int
-    execution_ms: int | None = None
+    execution_ms: Optional[int] = None
     test_count_estimate: int
     passed_test_count: int
 
@@ -199,9 +200,9 @@ class SubmissionHistoryItem(BaseModel):
     task_id: str
     status: str
     passed: bool
-    failed_assertion: str | None
+    failed_assertion: Optional[str]
     runtime_ms: int
-    execution_ms: int | None = None
+    execution_ms: Optional[int] = None
     test_count_estimate: int
     passed_test_count: int
     created_at: str
@@ -209,8 +210,9 @@ class SubmissionHistoryItem(BaseModel):
 
 class CoachRequest(BaseModel):
     task_id: str
-    code: str | None = None
-    submission_id: int | None = None
+    code: Optional[str] = None
+    submission_id: Optional[int] = None
+    thinking_mode: Optional[str] = None
 
 
 class CoachResponse(BaseModel):
@@ -220,8 +222,18 @@ class CoachResponse(BaseModel):
 class CoachChatRequest(BaseModel):
     task_id: str
     message: str
-    code: str | None = None
-    submission_id: int | None = None
+    code: Optional[str] = None
+    submission_id: Optional[int] = None
+    thinking_mode: Optional[str] = None
+
+
+class AgentCommandRequest(BaseModel):
+    task_id: str
+    command: str = "auto"
+    message: Optional[str] = None
+    code: Optional[str] = None
+    submission_id: Optional[int] = None
+    thinking_mode: Optional[str] = None
 
 
 class CoachMessage(BaseModel):
@@ -233,3 +245,34 @@ class CoachMessage(BaseModel):
 
 class CoachThreadResponse(BaseModel):
     messages: list[CoachMessage]
+
+
+class AgentMemoryItem(BaseModel):
+    id: int
+    user_id: str
+    memory_type: str
+    scope: str
+    topic: Optional[str]
+    task_id: Optional[str]
+    content: str
+    source: str
+    confidence: float
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class AgentMemoryListResponse(BaseModel):
+    memories: list[AgentMemoryItem]
+
+
+class AgentMemoryUpdateRequest(BaseModel):
+    content: Optional[str] = None
+    status: Optional[str] = None
+
+
+class AgentThreadSummaryResponse(BaseModel):
+    task_id: str
+    summary: Optional[str]
+    last_message_id: Optional[int] = None
+    updated_at: Optional[str] = None
