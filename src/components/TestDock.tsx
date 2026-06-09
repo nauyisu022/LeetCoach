@@ -51,9 +51,9 @@ export function TestDock({
   const passedCaseCount = caseResults?.filter((item) => item.response.passed).length ?? 0;
   const runStateClass = result ? (result.passed ? "passed" : "failed") : "idle";
   const runStateText = result ? `${passedCaseCount || result.passed_test_count}/${caseResults?.length || result.test_count_estimate} 通过` : "未运行";
-  const expectedOutput = selectedCase?.expectedOutput ? formatInlineOutput(selectedCase.expectedOutput) : undefined;
-  const returnOutput = selectedCaseResult?.return_output ? formatInlineOutput(selectedCaseResult.return_output) : undefined;
-  const printedOutput = selectedCaseResult?.stdout ? formatInlineOutput(selectedCaseResult.stdout) : undefined;
+  const expectedOutput = selectedCase?.expectedOutput ? formatDisplayOutput(selectedCase.expectedOutput) : undefined;
+  const returnOutput = selectedCaseResult?.return_output ? formatDisplayOutput(selectedCaseResult.return_output) : undefined;
+  const printedOutput = selectedCaseResult?.stdout ? formatDisplayOutput(selectedCaseResult.stdout) : undefined;
 
   return (
     <section className="test-dock">
@@ -225,8 +225,8 @@ export function TestDock({
   );
 }
 
-function formatInlineOutput(value: string) {
-  return value.replace(/\s*\r?\n\s*/g, " ").trim();
+function formatDisplayOutput(value: string) {
+  return value.replace(/\r\n/g, "\n").trim();
 }
 
 function formatDuration(value: { runtime_ms: number; execution_ms?: number | null }) {
