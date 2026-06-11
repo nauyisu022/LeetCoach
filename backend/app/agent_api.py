@@ -13,6 +13,11 @@ from .agent_runtime.inspection import (
     agent_tool_manifest_items,
     inspect_agent_invocation,
 )
+from .agent_runtime.artifacts import (
+    AgentArtifactRecord,
+    create_recommendation_set,
+    latest_recommendation_set,
+)
 from .agent_runtime.model import stream_agent_model_messages
 from .agent_runtime.problem_context import build_agent_problem_payload
 from .agent_runtime.runtime import AgentInvocation, build_agent_invocation
@@ -24,6 +29,9 @@ from .schemas import (
     AgentCommandPreviewResponse,
     AgentCommandRequest,
     AgentProblemSearchResponse,
+    AgentRecommendationItem,
+    AgentRecommendationSet,
+    AgentRecommendationSetResponse,
     AgentProfileInfo,
     AgentProfileResponse,
     AgentToolInfo,
@@ -90,9 +98,32 @@ class AgentApiService:
                 current_task_id=current_task_id,
                 limit=limit,
             )
+            record = None
+            if current_task_id:
+                with conn:
+                    record = create_recommendation_set(
+                        conn,
+                        user_id=self.user_id,
+                        source_task_id=current_task_id,
+                        query=result.payload["query"],
+                        interpreted_topics=result.payload["interpreted_topics"],
+                        results=result.payload["results"],
+                    )
         finally:
             conn.close()
-        return AgentProblemSearchResponse(**result.payload)
+        return AgentProblemSearchResponse(**result.payload, recommendation_set_id=record.id if record else None)
+
+    def latest_recommendation_set_response(
+        self,
+        *,
+        source_task_id: str | None = None,
+    ) -> AgentRecommendationSetResponse:
+        conn = self.connection_factory()
+        try:
+            record = latest_recommendation_set(conn, user_id=self.user_id, source_task_id=source_task_id)
+        finally:
+            conn.close()
+        return AgentRecommendationSetResponse(recommendation_set=_recommendation_set_from_record(record))
 
     def preview_command(self, request: AgentCommandRequest) -> AgentCommandPreviewResponse:
         invocation = self.invocation_from_request(request)
@@ -138,4 +169,22 @@ def agent_request_from_coach_chat_request(request: CoachChatRequest) -> AgentCom
         submission_id=request.submission_id,
         current_result=request.current_result,
         thinking_mode=request.thinking_mode,
+    )
+
+
+def _recommendation_set_from_record(record: AgentArtifactRecord | None) -> AgentRecommendationSet | None:
+    if record is None:
+        return None
+    payload = record.payload
+    return AgentRecommendationSet(
+        id=record.id,
+        user_id=record.user_id,
+        source_task_id=record.source_task_id,
+        title=record.title,
+        query=payload.get("query") or "",
+        interpreted_topics=list(payload.get("interpreted_topics") or []),
+        items=[AgentRecommendationItem(**item) for item in payload.get("items") or []],
+        status=record.status,
+        created_at=record.created_at,
+        updated_at=record.updated_at,
     )

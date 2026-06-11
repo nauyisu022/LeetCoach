@@ -39,6 +39,7 @@ from app.agent_runtime.service import (
 from app.agent_runtime.tools import (
     AgentToolRequest,
     JudgeContextTool,
+    LearningEventContextTool,
     MemoryContextTool,
     NoteContextTool,
     ProblemSearchTool,
@@ -53,6 +54,17 @@ from app.agent_runtime.tools import (
 from app.agent_runtime.turn import AgentTurnInput
 from app.db import get_connection, init_db
 from app.schemas import AgentCommandRequest, CoachChatRequest, CoachCurrentResult, CoachRequest
+
+
+EXPECTED_DEFAULT_TOOL_NAMES = [
+    "judge_context",
+    "solution_context",
+    "note_context",
+    "memory_context",
+    "learning_event_context",
+    "artifact_context",
+    "problem_search",
+]
 
 
 def _insert_problem(
@@ -176,6 +188,41 @@ def test_search_problem_catalog_resolves_current_topics(tmp_path, monkeypatch):
     conn.close()
 
 
+def test_agent_problem_search_creates_latest_recommendation_set(tmp_path, monkeypatch):
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
+    conn = get_connection(db_path)
+    init_db(conn)
+    with conn:
+        _insert_house_robber_family(conn)
+    conn.close()
+
+    def connection_factory():
+        return get_connection(db_path)
+
+    service = AgentApiService(
+        user_id="local",
+        connection_factory=connection_factory,
+        problem_loader=lambda task_id: {"task_id": task_id},
+    )
+
+    search = service.problem_search_response(
+        query="打家劫舍 类似题",
+        current_task_id="house-robber-iii",
+        limit=4,
+    )
+    latest = service.latest_recommendation_set_response(source_task_id="house-robber-iii")
+
+    assert search.recommendation_set_id is not None
+    assert latest.recommendation_set is not None
+    assert latest.recommendation_set.id == search.recommendation_set_id
+    assert latest.recommendation_set.source_task_id == "house-robber-iii"
+    assert [item.task_id for item in latest.recommendation_set.items][:2] == [
+        "house-robber",
+        "house-robber-ii",
+    ]
+
+
 def test_agent_context_runs_injected_tools(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
@@ -238,6 +285,58 @@ def test_agent_context_runs_injected_tools(tmp_path, monkeypatch):
             },
         )
     ]
+    conn.close()
+
+
+def test_learning_event_context_tool_reads_recent_related_events(tmp_path, monkeypatch):
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
+    conn = get_connection(db_path)
+    init_db(conn)
+    with conn:
+        _insert_problem(
+            conn,
+            task_id="house-robber",
+            question_id=198,
+            title_zh="打家劫舍",
+            tags_json='["Array", "Dynamic Programming"]',
+        )
+        conn.execute(
+            """
+            INSERT INTO learning_events (
+              user_id, task_id, topic, event_type, content, evidence_message_ids, confidence
+            ) VALUES
+              ('local', 'house-robber', 'Dynamic Programming', 'mastery', '旧的通过事件不应进入 prompt。', '[]', 0.7),
+              ('local', 'house-robber', 'Dynamic Programming', 'mastery', '198 提交通过，掌握线性 DP。', '[]', 0.8),
+              ('local', 'other-task', 'Dynamic Programming', 'mistake', 'DP 下标偏移错。', '[]', 0.7),
+              ('local', 'graph-task', 'Graph', 'mistake', '图题错误。', '[]', 0.7)
+            """
+        )
+
+    turn = AgentTurnInput(
+        user_id="local",
+        task_id="house-robber",
+        command="/explain",
+        message=None,
+        code=None,
+        submission_id=None,
+        current_result=None,
+        thinking_mode=None,
+    )
+    context = build_agent_context(
+        conn,
+        turn=turn,
+        problem=_problem_payload(task_id="house-robber", tags=["Dynamic Programming"]),
+        tools=[LearningEventContextTool()],
+    )
+    learning_result = context.tool_results[0]
+
+    prompt = learning_result.as_prompt_section()
+    assert learning_result.name == "learning_event_context"
+    assert "掌握线性 DP" in prompt
+    assert "旧的通过事件" not in prompt
+    assert "DP 下标偏移错" in prompt
+    assert "图题错误" not in prompt
     conn.close()
 
 
@@ -486,7 +585,7 @@ def test_default_agent_tools_have_manifest_metadata():
     specs = default_agent_tool_specs()
     names = [spec.name for spec in specs]
 
-    assert names == ["judge_context", "solution_context", "note_context", "memory_context", "problem_search"]
+    assert names == EXPECTED_DEFAULT_TOOL_NAMES
     for spec in specs:
         assert spec.description
         assert spec.trigger
@@ -523,13 +622,7 @@ def test_build_agent_problem_payload_includes_practice_context(tmp_path, monkeyp
 def test_default_agent_runtime_config_is_explicit_profile():
     config = default_agent_runtime_config()
 
-    assert [tool.name for tool in config.tools or []] == [
-        "judge_context",
-        "solution_context",
-        "note_context",
-        "memory_context",
-        "problem_search",
-    ]
+    assert [tool.name for tool in config.tools or []] == EXPECTED_DEFAULT_TOOL_NAMES
     assert set(config.route_handlers or {}) == {"diagnose", "explain", "search", "note_draft", "chat"}
     assert [hook.name for hook in config.hooks or []] == ["memory_curator"]
 
@@ -540,7 +633,7 @@ def test_default_agent_runtime_profile_manifest_exposes_composition():
 
     assert item.name == "teaching-agent-v1"
     assert item.stream_only is True
-    assert item.tool_names == ["judge_context", "solution_context", "note_context", "memory_context", "problem_search"]
+    assert item.tool_names == EXPECTED_DEFAULT_TOOL_NAMES
     assert item.command_routes == ["chat", "diagnose", "explain", "note_draft", "search"]
     assert item.hook_names == ["memory_curator"]
     assert "coach_messages" in item.state_backends
@@ -1213,6 +1306,63 @@ def test_agent_api_converts_legacy_coach_requests_without_dropping_context():
     assert chat_request.thinking_mode == "disabled"
 
 
+def test_submission_records_learning_event(tmp_path, monkeypatch):
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
+    conn = get_connection(db_path)
+    init_db(conn)
+    with conn:
+        _insert_problem(conn, tags_json='["Array", "Hash Table"]')
+    conn.close()
+
+    from app import main
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        main,
+        "run_submission",
+        lambda **kwargs: SimpleNamespace(
+            passed=True,
+            failed_assertion=None,
+            stderr=None,
+            stdout=None,
+            return_output=None,
+            runtime_ms=3,
+            execution_ms=1,
+            test_count_estimate=1,
+            passed_test_count=1,
+        ),
+    )
+    client = TestClient(main.app)
+    response = client.post(
+        "/api/submissions",
+        json={
+            "task_id": "two-sum",
+            "code": "class Solution:\n    def twoSum(self, nums, target):\n        return [0, 1]\n",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "passed"
+
+    conn = get_connection(db_path)
+    event = conn.execute(
+        """
+        SELECT *
+        FROM learning_events
+        WHERE user_id = 'local' AND task_id = 'two-sum'
+        ORDER BY id DESC
+        LIMIT 1
+        """
+    ).fetchone()
+    conn.close()
+
+    assert event is not None
+    assert event["topic"] == "Array"
+    assert event["event_type"] == "mastery"
+    assert "两数之和 提交通过" in event["content"]
+
+
 def test_agent_stream_creates_proposed_memory_and_summary(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
@@ -1627,7 +1777,7 @@ def test_agent_tools_endpoint_returns_manifest(tmp_path, monkeypatch):
     assert response.status_code == 200
     payload = response.json()
     names = [tool["name"] for tool in payload["tools"]]
-    assert names == ["judge_context", "solution_context", "note_context", "memory_context", "problem_search"]
+    assert names == EXPECTED_DEFAULT_TOOL_NAMES
     assert payload["tools"][0]["trigger"] == "Runs on every agent turn."
 
 
@@ -1677,9 +1827,11 @@ def test_agent_profile_endpoint_returns_runtime_profile(tmp_path, monkeypatch):
     profile = response.json()["profile"]
     assert profile["name"] == "teaching-agent-v1"
     assert profile["stream_only"] is True
-    assert profile["tool_names"] == ["judge_context", "solution_context", "note_context", "memory_context", "problem_search"]
+    assert profile["tool_names"] == EXPECTED_DEFAULT_TOOL_NAMES
     assert profile["hook_names"] == ["memory_curator"]
     assert "user_memory_items" in profile["state_backends"]
+    assert "learning_events" in profile["state_backends"]
+    assert "agent_artifacts" in profile["state_backends"]
 
 
 def test_agent_command_preview_returns_invocation_context(tmp_path, monkeypatch):

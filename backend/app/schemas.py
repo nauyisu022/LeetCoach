@@ -368,6 +368,35 @@ class AgentProblemSearchResponse(BaseModel):
     query: str
     interpreted_topics: list[str]
     results: list[AgentProblemSearchResult]
+    recommendation_set_id: Optional[int] = None
+
+
+class AgentRecommendationItem(BaseModel):
+    order: int
+    task_id: str
+    question_id: int
+    title: str
+    difficulty: str
+    tags: list[str]
+    codetop_frequency: Optional[int] = None
+    status: str = "not_started"
+
+
+class AgentRecommendationSet(BaseModel):
+    id: int
+    user_id: str
+    source_task_id: Optional[str]
+    title: str
+    query: str
+    interpreted_topics: list[str]
+    items: list[AgentRecommendationItem]
+    status: str
+    created_at: str
+    updated_at: str
+
+
+class AgentRecommendationSetResponse(BaseModel):
+    recommendation_set: Optional[AgentRecommendationSet]
 
 
 class AgentToolInfo(BaseModel):

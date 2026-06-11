@@ -23,6 +23,7 @@ from .schemas import (
     AgentMemoryUpdateRequest,
     AgentProfileResponse,
     AgentProblemSearchResponse,
+    AgentRecommendationSetResponse,
     AgentThreadResponse,
     AgentThreadSummaryResponse,
     AgentToolListResponse,
@@ -100,6 +101,10 @@ def create_agent_router(
             current_task_id=current_task_id,
             limit=limit,
         )
+
+    @router.get("/api/agent/recommendation-sets/latest", response_model=AgentRecommendationSetResponse)
+    def latest_recommendation_set(source_task_id: str | None = None) -> AgentRecommendationSetResponse:
+        return agent_api_service().latest_recommendation_set_response(source_task_id=source_task_id)
 
     @router.get("/api/agent/memories", response_model=AgentMemoryListResponse)
     def agent_memories(

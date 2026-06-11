@@ -67,7 +67,9 @@ class AgentRuntimeProfile:
         "coach_messages",
         "submissions.ai_diagnosis_summary",
         "user_memory_items",
+        "learning_events",
         "practice_notes",
+        "agent_artifacts",
     )
 
 

@@ -11,6 +11,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from .agent_runtime.model import stream_agent_model_messages
+from .agent_runtime.memory import create_learning_event
 from .agent_routes import create_agent_router
 from .db import get_connection, init_db
 from .judge_service import run_custom_input, run_submission
@@ -159,7 +160,8 @@ def submit(request: SubmissionRequest) -> SubmissionResponse:
             ),
         )
         _upsert_saved_solution(conn, task_id=request.task_id, code=request.code)
-    submission_id = int(cursor.lastrowid)
+        submission_id = int(cursor.lastrowid)
+        _record_submission_learning_event(conn, problem=problem, request=request, result=result)
     conn.close()
     return _submission_response(submission_id, request.task_id, "submit", result)
 
@@ -232,6 +234,37 @@ def _fetch_problem_row(task_id: str):
 
 def _problem_practice_api_service() -> ProblemPracticeApiService:
     return ProblemPracticeApiService(user_id=DEFAULT_USER_ID, connection_factory=get_connection)
+
+
+def _record_submission_learning_event(conn, *, problem, request: SubmissionRequest, result: Any) -> None:
+    raw_tags = json.loads(problem["tags_json"])
+    topic = raw_tags[0] if raw_tags else None
+    title = problem["title_zh"] or problem["task_id"]
+    if result.passed:
+        event_type = "mastery"
+        if result.test_count_estimate:
+            content = (
+                f"{problem['question_id']}. {title} 提交通过，"
+                f"{result.passed_test_count}/{result.test_count_estimate} 个测试通过。"
+            )
+        else:
+            content = f"{problem['question_id']}. {title} 提交通过。"
+        confidence = 0.82
+    else:
+        event_type = "mistake"
+        failure = result.failed_assertion or result.stderr or "提交未通过"
+        content = f"{problem['question_id']}. {title} 提交失败：{str(failure)[:220]}"
+        confidence = 0.68
+    create_learning_event(
+        conn,
+        user_id=DEFAULT_USER_ID,
+        task_id=request.task_id,
+        topic=topic,
+        event_type=event_type,
+        content=content,
+        evidence_message_ids=[],
+        confidence=confidence,
+    )
 
 
 def _topic_memory_from_row(row) -> TopicMemory:

@@ -34,6 +34,19 @@ class AgentThreadSummaryRecord:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class LearningEventRecord:
+    id: int
+    user_id: str
+    task_id: str | None
+    topic: str | None
+    event_type: str
+    content: str
+    evidence_message_ids: list[int]
+    confidence: float
+    created_at: str
+
+
 def memory_record_from_row(row: sqlite3.Row) -> AgentMemoryRecord:
     return AgentMemoryRecord(
         id=row["id"],
@@ -57,6 +70,20 @@ def thread_summary_record_from_row(row: sqlite3.Row) -> AgentThreadSummaryRecord
         summary=row["summary"],
         last_message_id=row["last_message_id"],
         updated_at=row["updated_at"],
+    )
+
+
+def learning_event_record_from_row(row: sqlite3.Row) -> LearningEventRecord:
+    return LearningEventRecord(
+        id=row["id"],
+        user_id=row["user_id"],
+        task_id=row["task_id"],
+        topic=row["topic"],
+        event_type=row["event_type"],
+        content=row["content"],
+        evidence_message_ids=json.loads(row["evidence_message_ids"]),
+        confidence=row["confidence"],
+        created_at=row["created_at"],
     )
 
 
@@ -248,6 +275,58 @@ def create_learning_event(
         ),
     )
     return int(cursor.lastrowid)
+
+
+def fetch_recent_learning_events_for_context(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    task_id: str,
+    topics: list[str],
+    limit: int = 6,
+) -> list[sqlite3.Row]:
+    topic_values = [topic for topic in dict.fromkeys(topics) if topic]
+    topic_clause = ""
+    params: list[Any] = [user_id, task_id]
+    if topic_values:
+        placeholders = ", ".join("?" for _ in topic_values)
+        topic_clause = f" OR topic IN ({placeholders})"
+        params.extend(topic_values)
+    params.append(limit)
+    return conn.execute(
+        f"""
+        SELECT *
+        FROM learning_events
+        WHERE user_id = ?
+          AND (
+            task_id = ?
+            {topic_clause}
+          )
+        ORDER BY created_at DESC, id DESC
+        LIMIT ?
+        """,
+        params,
+    ).fetchall()
+
+
+def learning_event_rows_for_prompt(rows: list[sqlite3.Row]) -> list[dict[str, str]]:
+    events: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for row in rows:
+        key = (row["task_id"] or "", row["topic"] or "", row["event_type"])
+        if key in seen:
+            continue
+        seen.add(key)
+        events.append(
+            {
+                "type": row["event_type"],
+                "task_id": row["task_id"] or "",
+                "topic": row["topic"] or "",
+                "content": row["content"],
+                "created_at": row["created_at"],
+            }
+        )
+    return events
 
 
 def create_proposed_memory(

@@ -1009,6 +1009,63 @@ select {
   font-size: 15px;
 }
 
+.recommendation-trail {
+  display: flex;
+  min-height: 34px;
+  align-items: center;
+  gap: 9px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: 5px 9px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.recommendation-trail-label {
+  flex: 0 0 auto;
+  color: var(--text);
+  font-weight: 800;
+}
+
+.recommendation-trail-source {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recommendation-trail-links {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+}
+
+.recommendation-trail a {
+  flex: 0 0 auto;
+  color: var(--primary);
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.recommendation-trail a:hover {
+  text-decoration: underline;
+}
+
+.recommendation-trail a.active {
+  color: var(--text);
+}
+
 .empty-start {
   display: inline-flex;
   align-items: center;
@@ -1483,6 +1540,12 @@ pre {
 .thinking-toggle:hover {
   border-color: var(--border-strong);
   background: var(--surface-muted);
+}
+
+.coach-tool-button {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
 }
 
 .primary-button:focus-visible,
@@ -2545,49 +2608,6 @@ button:disabled {
 
 .markdown-problem-link:hover {
   text-decoration: underline;
-}
-
-.message-problem-links {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: 10px;
-}
-
-.problem-link-chip {
-  display: inline-flex;
-  min-width: 0;
-  max-width: 100%;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--surface-muted);
-  padding: 6px 9px;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 700;
-  line-height: 1.25;
-  cursor: pointer;
-}
-
-.problem-link-chip:hover {
-  border-color: var(--primary-border);
-  color: var(--primary);
-}
-
-.problem-link-chip span {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.problem-link-chip small {
-  flex: 0 0 auto;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 700;
 }
 
 .markdown-body code {

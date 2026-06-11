@@ -8,6 +8,7 @@ import { MemoryPanel } from "./components/MemoryPanel";
 import { NotesPanel } from "./components/NotesPanel";
 import { ProblemList } from "./components/ProblemList";
 import { ProblemPanel } from "./components/ProblemPanel";
+import { RecommendationTrail } from "./components/RecommendationTrail";
 import { TestDock } from "./components/TestDock";
 import {
   acceptAgentMemory,
@@ -15,6 +16,7 @@ import {
   fetchAgentCommands,
   fetchAgentMemories,
   fetchAgentThread,
+  fetchLatestRecommendationSet,
   fetchProblem,
   fetchProblems,
   fetchProblemTags,
@@ -39,6 +41,7 @@ import type {
   AgentMemoryItem,
   AgentCommandInfo,
   AgentCommandPreviewResponse,
+  AgentRecommendationSet,
   AgentThreadMessage,
   CustomTestCase,
   DisplaySubmissionResponse,
@@ -66,6 +69,7 @@ const RUN_CASE_CONCURRENCY = 4;
 const FALLBACK_CUSTOM_INPUT = "nums = [2,7,11,15]\ntarget = 9";
 const SELECTED_TASK_STORAGE_KEY = "leetcoach:selected-task-id";
 const AI_THINKING_STORAGE_KEY = "leetcoach:ai-thinking-mode";
+const ACTIVE_RECOMMENDATION_SOURCE_STORAGE_KEY = "leetcoach:active-recommendation-source-task-id";
 
 const FALLBACK_COACH_COMMANDS: CoachCommandAction[] = [
   { command: "/explain", label: "讲解", icon: "explain" },
@@ -207,6 +211,10 @@ export function App() {
   const [topicMemories, setTopicMemories] = useState<TopicMemory[]>([]);
   const [agentMemories, setAgentMemories] = useState<AgentMemoryItem[]>([]);
   const [agentCommands, setAgentCommands] = useState<AgentCommandInfo[]>([]);
+  const [activeRecommendationSourceTaskId, setActiveRecommendationSourceTaskId] = useState<string | null>(() => (
+    window.localStorage.getItem(ACTIVE_RECOMMENDATION_SOURCE_STORAGE_KEY)
+  ));
+  const [activeRecommendationSet, setActiveRecommendationSet] = useState<AgentRecommendationSet | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(() => (
     window.localStorage.getItem(SELECTED_TASK_STORAGE_KEY) ?? undefined
   ));
@@ -317,6 +325,33 @@ export function App() {
   useEffect(() => {
     window.localStorage.setItem(AI_THINKING_STORAGE_KEY, thinkingMode);
   }, [thinkingMode]);
+
+  useEffect(() => {
+    if (activeRecommendationSourceTaskId) {
+      window.localStorage.setItem(ACTIVE_RECOMMENDATION_SOURCE_STORAGE_KEY, activeRecommendationSourceTaskId);
+    } else {
+      window.localStorage.removeItem(ACTIVE_RECOMMENDATION_SOURCE_STORAGE_KEY);
+    }
+  }, [activeRecommendationSourceTaskId]);
+
+  useEffect(() => {
+    if (!activeRecommendationSourceTaskId) {
+      setActiveRecommendationSet(null);
+      return;
+    }
+    let isCurrent = true;
+    fetchLatestRecommendationSet(activeRecommendationSourceTaskId)
+      .then((response) => {
+        if (isCurrent) setActiveRecommendationSet(response.recommendation_set);
+      })
+      .catch((err: Error) => {
+        if (isCurrent) setError(err.message);
+      });
+
+    return () => {
+      isCurrent = false;
+    };
+  }, [activeRecommendationSourceTaskId]);
 
   useEffect(() => {
     fetchPracticeQueue(filters, selectedTaskId)
@@ -743,6 +778,11 @@ export function App() {
       );
       const thread = await fetchAgentThread(problem.task_id);
       setCoachMessages(thread.messages);
+      if (command === "/search-problems") {
+        const response = await fetchLatestRecommendationSet(problem.task_id);
+        setActiveRecommendationSourceTaskId(problem.task_id);
+        setActiveRecommendationSet(response.recommendation_set);
+      }
       void refreshAgentMemoryList(problem.task_id);
     } catch (err) {
       if (isAbortError(err)) {
@@ -1017,6 +1057,11 @@ export function App() {
           </div>
         </header>
         {error && <div className="error-banner">{error}</div>}
+        <RecommendationTrail
+          recommendationSet={activeRecommendationSet}
+          selectedTaskId={selectedTaskId}
+          onSelect={(taskId) => void handleProblemSelect(taskId)}
+        />
         {!problem && (
           <button className="empty-start" onClick={() => setProblemDrawerOpen(true)}>
             <BookOpen size={18} />
@@ -1125,7 +1170,6 @@ export function App() {
                       messages={coachMessages}
                       isLoading={isCoachLoading}
                       commandActions={coachCommandActions}
-                      problemLinks={problems}
                       onCommandAction={handleCoachCommand}
                       onProblemLinkClick={(taskId) => void handleProblemSelect(taskId)}
                       onPreviewContext={handlePreviewAgentContext}

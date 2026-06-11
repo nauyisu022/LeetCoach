@@ -9,7 +9,13 @@ from typing import Any, Protocol, Sequence
 from ..notes import fetch_note, fetch_note_topics
 from ..practice import topic_names_for_problem
 from ..topic_taxonomy import display_topic_labels, normalize_topic_name, topic_aliases
-from .memory import fetch_accepted_memories_for_context, memory_rows_for_prompt
+from .artifacts import RECOMMENDATION_SET_TYPE
+from .memory import (
+    fetch_accepted_memories_for_context,
+    fetch_recent_learning_events_for_context,
+    learning_event_rows_for_prompt,
+    memory_rows_for_prompt,
+)
 from .turn import AgentTurnInput
 
 
@@ -285,8 +291,88 @@ class MemoryContextTool:
         )
 
 
+class LearningEventContextTool:
+    name = "learning_event_context"
+    spec = AgentToolSpec(
+        name=name,
+        description="Read recent task/topic learning events as short-term learning state.",
+        trigger="Runs on every agent turn.",
+        prompt_visibility="Visible only when recent learning events exist.",
+    )
+
+    def should_run(self, request: AgentToolRequest) -> bool:
+        return True
+
+    def run(self, request: AgentToolRequest) -> ToolResult:
+        rows = fetch_recent_learning_events_for_context(
+            request.conn,
+            user_id=request.turn.user_id,
+            task_id=request.turn.task_id,
+            topics=request.current_topics,
+        )
+        events = learning_event_rows_for_prompt(rows)
+        return ToolResult(
+            name=self.name,
+            payload={"events": events},
+            prompt_section=_learning_event_context_prompt_section(events),
+        )
+
+
+class ArtifactContextTool:
+    name = "artifact_context"
+    spec = AgentToolSpec(
+        name=name,
+        description="Read active agent artifacts that explain the user's current learning path.",
+        trigger="Runs on every agent turn.",
+        prompt_visibility="Visible only when a current artifact is relevant.",
+    )
+
+    def should_run(self, request: AgentToolRequest) -> bool:
+        return True
+
+    def run(self, request: AgentToolRequest) -> ToolResult:
+        rows = request.conn.execute(
+            """
+            SELECT *
+            FROM agent_artifacts
+            WHERE user_id = ?
+              AND artifact_type = ?
+              AND status = 'active'
+            ORDER BY id DESC
+            LIMIT 5
+            """,
+            (request.turn.user_id, RECOMMENDATION_SET_TYPE),
+        ).fetchall()
+        artifact = None
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            task_ids = {item.get("task_id") for item in payload.get("items") or []}
+            if row["source_task_id"] == request.turn.task_id or request.turn.task_id in task_ids:
+                artifact = {
+                    "id": row["id"],
+                    "type": row["artifact_type"],
+                    "source_task_id": row["source_task_id"],
+                    "title": row["title"],
+                    "query": payload.get("query"),
+                    "interpreted_topics": payload.get("interpreted_topics") or [],
+                    "items": payload.get("items") or [],
+                    "created_at": row["created_at"],
+                }
+                break
+        payload = {"artifact": artifact}
+        return ToolResult(name=self.name, payload=payload, prompt_section=_artifact_context_prompt_section(artifact))
+
+
 def default_agent_tools() -> list[AgentTool]:
-    return [JudgeContextTool(), SolutionContextTool(), NoteContextTool(), MemoryContextTool(), ProblemSearchTool()]
+    return [
+        JudgeContextTool(),
+        SolutionContextTool(),
+        NoteContextTool(),
+        MemoryContextTool(),
+        LearningEventContextTool(),
+        ArtifactContextTool(),
+        ProblemSearchTool(),
+    ]
 
 
 def default_agent_tool_specs() -> list[AgentToolSpec]:
@@ -384,6 +470,42 @@ def _note_context_prompt_section(note: dict[str, Any] | None) -> str:
     content = note.get("content_markdown")
     if content:
         lines.append(f"笔记正文摘录:\n{content}")
+    return "\n".join(lines)
+
+
+def _artifact_context_prompt_section(artifact: dict[str, Any] | None) -> str:
+    if not artifact:
+        return ""
+    lines = [
+        "工具结果：当前学习路径 artifact。",
+        f"类型：{artifact.get('type')}",
+        f"来源题：{artifact.get('source_task_id')}",
+        f"标题：{artifact.get('title')}",
+        f"用户原问题：{artifact.get('query')}",
+    ]
+    topics = artifact.get("interpreted_topics") or []
+    if topics:
+        lines.append(f"主题：{'、'.join(topics)}")
+    items = artifact.get("items") or []
+    if items:
+        lines.append("同一题单：")
+        for item in items[:8]:
+            lines.append(
+                f"- {item.get('question_id')}. {item.get('title')} ({item.get('task_id')}) "
+                f"{item.get('difficulty')}"
+            )
+    lines.append("回答时可利用这条学习路径说明用户为什么来到当前题，但不要复述完整旧聊天。")
+    return "\n".join(lines)
+
+
+def _learning_event_context_prompt_section(events: list[dict[str, str]]) -> str:
+    if not events:
+        return ""
+    lines = ["工具结果：近期学习事件（短期/近期状态，不等同于长期记忆）。"]
+    for event in events[:6]:
+        source = event.get("task_id") or event.get("topic") or "global"
+        lines.append(f"- [{event.get('type')}] {source}: {event.get('content')}")
+    lines.append("回答时优先利用这些事件保持练习连续性；如果和当前题无关，不要强行引用。")
     return "\n".join(lines)
 
 

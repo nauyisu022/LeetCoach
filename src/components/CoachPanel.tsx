@@ -1,10 +1,10 @@
-import { Brain, FileText, Loader2, MessageSquare, ScanSearch, Search, Send, Sparkles, Trash2, X } from "lucide-react";
+import { Brain, FileText, Loader2, MessageSquare, Search, Send, Sparkles, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { CodeBlock } from "./CodeBlock";
-import type { AgentThreadMessage, ProblemSummary, ThinkingMode } from "../types/api";
+import type { AgentThreadMessage, ThinkingMode } from "../types/api";
 
 export type CoachCommandAction = {
   command: string;
@@ -16,7 +16,6 @@ type Props = {
   messages: AgentThreadMessage[];
   isLoading: boolean;
   commandActions: CoachCommandAction[];
-  problemLinks: ProblemSummary[];
   onCommandAction: (command: string) => void;
   onProblemLinkClick: (taskId: string) => void;
   onPreviewContext: (message?: string) => void;
@@ -44,32 +43,10 @@ function problemTaskIdFromHref(href: string | undefined): string | null {
   return null;
 }
 
-function problemReferencesFromContent(content: string, problems: ProblemSummary[]): ProblemSummary[] {
-  if (!content || !problems.length) return [];
-  const matches: ProblemSummary[] = [];
-  const seen = new Set<string>();
-  const lowerContent = content.toLowerCase();
-
-  for (const problem of problems) {
-    const title = problem.title?.trim();
-    const questionPattern = new RegExp(`leetcode\\s*${problem.question_id}(?!\\d)`, "i");
-    const hasReference = lowerContent.includes(problem.task_id.toLowerCase())
-      || (title ? content.includes(title) : false)
-      || questionPattern.test(content);
-    if (!hasReference || seen.has(problem.task_id)) continue;
-    seen.add(problem.task_id);
-    matches.push(problem);
-    if (matches.length >= 8) break;
-  }
-
-  return matches;
-}
-
 export function CoachPanel({
   messages = [],
   isLoading,
   commandActions,
-  problemLinks,
   onCommandAction,
   onProblemLinkClick,
   onPreviewContext,
@@ -137,30 +114,10 @@ export function CoachPanel({
 
   function renderMessageContent(message: AgentThreadMessage) {
     if (message.content) {
-      const problemReferences = message.role === "assistant"
-        ? problemReferencesFromContent(message.content, problemLinks)
-        : [];
       return (
-        <>
-          <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
-            {message.content}
-          </ReactMarkdown>
-          {problemReferences.length > 0 && (
-            <div className="message-problem-links" aria-label="推荐题跳转">
-              {problemReferences.map((item) => (
-                <button
-                  className="problem-link-chip"
-                  key={item.task_id}
-                  type="button"
-                  onClick={() => onProblemLinkClick(item.task_id)}
-                >
-                  <span>{item.question_id}. {item.title}</span>
-                  <small>{item.difficulty}</small>
-                </button>
-              ))}
-            </div>
-          )}
-        </>
+        <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
+          {message.content}
+        </ReactMarkdown>
       );
     }
 
@@ -189,17 +146,8 @@ export function CoachPanel({
             {action.label}
           </button>
         ))}
-        <button
-          className="ghost-button"
-          onClick={() => onPreviewContext(draft.trim() || undefined)}
-          disabled={isLoading || isPreviewLoading}
-        >
-          {isPreviewLoading ? <Loader2 className="spin" size={15} /> : <ScanSearch size={15} />}
-          上下文
-        </button>
-        <button className="ghost-button" onClick={onClear} disabled={isLoading || messages.length === 0}>
+        <button className="icon-button coach-tool-button" onClick={onClear} disabled={isLoading || messages.length === 0} title="清空对话" aria-label="清空对话">
           <Trash2 size={15} />
-          清空
         </button>
         <button
           className={`thinking-toggle ${thinkingMode === "enabled" ? "active" : ""}`}

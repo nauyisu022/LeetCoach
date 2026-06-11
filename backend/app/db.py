@@ -299,6 +299,23 @@ def _init_user_db(conn: sqlite3.Connection) -> None:
 
         CREATE INDEX IF NOT EXISTS {USER_DB_ALIAS}.idx_coach_thread_summaries_user_task
           ON coach_thread_summaries(user_id, task_id);
+
+        CREATE TABLE IF NOT EXISTS {USER_DB_ALIAS}.agent_artifacts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            artifact_type TEXT NOT NULL,
+            source_task_id TEXT,
+            title TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'active',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE INDEX IF NOT EXISTS {USER_DB_ALIAS}.idx_agent_artifacts_user_type_status
+          ON agent_artifacts(user_id, artifact_type, status, updated_at);
+        CREATE INDEX IF NOT EXISTS {USER_DB_ALIAS}.idx_agent_artifacts_user_source
+          ON agent_artifacts(user_id, source_task_id, artifact_type, updated_at);
         """
     )
 

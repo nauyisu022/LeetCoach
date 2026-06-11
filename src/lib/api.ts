@@ -8,6 +8,7 @@ import type {
   AgentMemoryUpdateRequest,
   AgentProfileResponse,
   AgentProblemSearchResponse,
+  AgentRecommendationSetResponse,
   AgentThreadResponse,
   AgentToolListResponse,
   CoachCurrentResult,
@@ -234,6 +235,13 @@ export function fetchAgentCommands(): Promise<AgentCommandListResponse> {
 
 export function fetchAgentProfile(): Promise<AgentProfileResponse> {
   return request("/api/agent/profile");
+}
+
+export function fetchLatestRecommendationSet(sourceTaskId?: string): Promise<AgentRecommendationSetResponse> {
+  const params = new URLSearchParams();
+  if (sourceTaskId) params.set("source_task_id", sourceTaskId);
+  const suffix = params.toString();
+  return request(`/api/agent/recommendation-sets/latest${suffix ? `?${suffix}` : ""}`);
 }
 
 export function previewAgentCommand(payload: AgentCommandRequest): Promise<AgentCommandPreviewResponse> {

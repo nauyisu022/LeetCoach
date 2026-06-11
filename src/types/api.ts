@@ -330,6 +330,35 @@ export type AgentProblemSearchResponse = {
   query: string;
   interpreted_topics: string[];
   results: AgentProblemSearchResult[];
+  recommendation_set_id: number | null;
+};
+
+export type AgentRecommendationItem = {
+  order: number;
+  task_id: string;
+  question_id: number;
+  title: string;
+  difficulty: string;
+  tags: string[];
+  codetop_frequency?: number | null;
+  status: string;
+};
+
+export type AgentRecommendationSet = {
+  id: number;
+  user_id: string;
+  source_task_id: string | null;
+  title: string;
+  query: string;
+  interpreted_topics: string[];
+  items: AgentRecommendationItem[];
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type AgentRecommendationSetResponse = {
+  recommendation_set: AgentRecommendationSet | null;
 };
 
 export type Filters = {

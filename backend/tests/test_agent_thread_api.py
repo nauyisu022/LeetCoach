@@ -106,11 +106,11 @@ def test_agent_thread_routes_preferred_path_and_coach_compatibility(tmp_path, mo
 
     from app.main import app
 
-    client = TestClient(app)
-    agent_response = client.get("/api/agent/thread/two-sum")
-    coach_response = client.get("/api/coach/thread/two-sum")
-    clear_response = client.delete("/api/agent/thread/two-sum")
-    empty_response = client.get("/api/agent/thread/two-sum")
+    with TestClient(app) as client:
+        agent_response = client.get("/api/agent/thread/two-sum")
+        coach_response = client.get("/api/coach/thread/two-sum")
+        clear_response = client.delete("/api/agent/thread/two-sum")
+        empty_response = client.get("/api/agent/thread/two-sum")
 
     assert agent_response.status_code == 200
     assert [message["content"] for message in agent_response.json()["messages"]] == ["first", "second"]

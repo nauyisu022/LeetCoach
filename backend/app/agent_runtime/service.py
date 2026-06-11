@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from ..db import get_connection
+from .artifacts import create_recommendation_set
 from .hooks import AfterCoachResponseEvent, AgentHook, run_after_coach_response_hooks
 from .model import stream_agent_model_messages
 from .runtime import AgentInvocation
@@ -93,7 +94,7 @@ def stream_agent_invocation(
     *,
     ai_streamer: AIStreamer = stream_agent_model_messages,
 ) -> Iterator[str]:
-    return stream_agent_turn(
+    yield from stream_agent_turn(
         AgentStreamTurn(
             user_id=invocation.turn.user_id,
             task_id=invocation.turn.task_id,
@@ -107,6 +108,7 @@ def stream_agent_invocation(
         ),
         ai_streamer=ai_streamer,
     )
+    persist_agent_artifacts(invocation)
 
 
 def stream_note_draft_invocation(
@@ -195,5 +197,31 @@ def update_submission_ai_summary(user_id: str, submission_id: int, text: str) ->
         conn.execute(
             "UPDATE submissions SET ai_diagnosis_summary = ? WHERE user_id = ? AND id = ?",
             (text[:1000], user_id, submission_id),
+        )
+    conn.close()
+
+
+def persist_agent_artifacts(invocation: AgentInvocation) -> None:
+    if invocation.plan.command != "/search-problems":
+        return
+    search_result = next(
+        (result for result in invocation.context.tool_results if result.name == "problem_search" and result.ok),
+        None,
+    )
+    if not search_result:
+        return
+    payload = search_result.payload
+    results = payload.get("results") or []
+    if not results:
+        return
+    conn = get_connection()
+    with conn:
+        create_recommendation_set(
+            conn,
+            user_id=invocation.turn.user_id,
+            source_task_id=invocation.turn.task_id,
+            query=payload.get("query") or invocation.plan.user_content,
+            interpreted_topics=list(payload.get("interpreted_topics") or []),
+            results=results,
         )
     conn.close()
