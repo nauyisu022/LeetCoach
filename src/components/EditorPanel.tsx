@@ -1,8 +1,10 @@
 import Editor from "@monaco-editor/react";
-import { memo } from "react";
+import type { Monaco } from "@monaco-editor/react";
+import { memo, useRef } from "react";
 
 type Props = {
   code: string;
+  problemTaskId?: string;
   isSavingSolution: boolean;
   solutionDirty: boolean;
   solutionSavedAt?: string;
@@ -11,6 +13,7 @@ type Props = {
 
 export function EditorPanel({
   code,
+  problemTaskId,
   isSavingSolution,
   solutionDirty,
   solutionSavedAt,
@@ -26,30 +29,54 @@ export function EditorPanel({
         </div>
       </div>
 
-      <CodeEditor code={code} onCodeChange={onCodeChange} />
+      <CodeEditor code={code} problemTaskId={problemTaskId} onCodeChange={onCodeChange} />
     </section>
   );
 }
 
 const CodeEditor = memo(function CodeEditor({
   code,
+  problemTaskId,
   onCodeChange
 }: {
   code: string;
+  problemTaskId?: string;
   onCodeChange: (code: string) => void;
 }) {
+  const activeProblemTaskIdRef = useRef(problemTaskId);
+  if (problemTaskId) {
+    activeProblemTaskIdRef.current = problemTaskId;
+  }
+  const activeProblemTaskId = activeProblemTaskIdRef.current;
+
+  if (!activeProblemTaskId) {
+    return <div className="editor-frame" />;
+  }
+
   return (
     <div className="editor-frame">
       <Editor
+        path={`leetcoach://problems/${encodeURIComponent(activeProblemTaskId)}.py`}
         height="100%"
-        language="python"
-        theme="vs"
-        value={code}
+        defaultLanguage="python"
+        defaultValue={code}
+        theme="leetcoach-light"
+        beforeMount={configureEditorTheme}
+        saveViewState
         options={{
           minimap: { enabled: false },
           fontSize: 17,
           lineHeight: 27,
+          overviewRulerBorder: false,
+          overviewRulerLanes: 0,
           scrollBeyondLastLine: false,
+          scrollbar: {
+            alwaysConsumeMouseWheel: false,
+            arrowSize: 0,
+            horizontalScrollbarSize: 8,
+            useShadows: false,
+            verticalScrollbarSize: 8
+          },
           wordWrap: "on"
         }}
         onChange={(value) => onCodeChange(value ?? "")}
@@ -57,3 +84,17 @@ const CodeEditor = memo(function CodeEditor({
     </div>
   );
 });
+
+function configureEditorTheme(monaco: Monaco) {
+  monaco.editor.defineTheme("leetcoach-light", {
+    base: "vs",
+    inherit: true,
+    rules: [],
+    colors: {
+      "scrollbar.shadow": "#00000000",
+      "scrollbarSlider.activeBackground": "#66708570",
+      "scrollbarSlider.background": "#6670853D",
+      "scrollbarSlider.hoverBackground": "#6670855C"
+    }
+  });
+}

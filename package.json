@@ -10,6 +10,7 @@
     "lint": "eslint ."
   },
   "dependencies": {
+    "@assistant-ui/react": "^0.14.18",
     "@monaco-editor/react": "^4.7.0",
     "allotment": "^1.20.5",
     "lucide-react": "^0.468.0",

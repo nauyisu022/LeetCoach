@@ -20,6 +20,59 @@ class ProblemSummary(BaseModel):
     codetop_last_asked_at: Optional[str] = None
 
 
+class StudyPlanSummary(BaseModel):
+    id: int
+    slug: str
+    title: str
+    source_type: str
+    source_url: str
+    description: Optional[str] = None
+    fetched_at: Optional[str] = None
+    total_count: int
+    available_count: int
+    missing_count: int
+    passed_count: int
+    needs_review_count: int
+    unseen_count: int
+    progress: float
+
+
+class StudyPlanGroupSummary(BaseModel):
+    group_name: str
+    group_slug: str
+    group_position: int
+    total_count: int
+    available_count: int
+    missing_count: int
+    passed_count: int
+    needs_review_count: int
+    unseen_count: int
+
+
+class StudyPlanProblemSummary(ProblemSummary):
+    study_plan_slug: str
+    group_name: str
+    group_slug: str
+    group_position: int
+    item_position: int
+    plan_position: int
+    paid_only: bool
+    available: bool
+    external_slug: str
+    leetcode_url: str
+
+
+class StudyPlanListResponse(BaseModel):
+    plans: list[StudyPlanSummary]
+
+
+class StudyPlanItemsResponse(BaseModel):
+    plan: StudyPlanSummary
+    groups: list[StudyPlanGroupSummary]
+    items: list[StudyPlanProblemSummary]
+    next_task_id: Optional[str]
+
+
 class ProgressSummary(BaseModel):
     total: int
     passed: int
@@ -227,27 +280,6 @@ class SubmissionHistoryItem(BaseModel):
     created_at: str
 
 
-class CoachRequest(BaseModel):
-    task_id: str
-    code: Optional[str] = None
-    submission_id: Optional[int] = None
-    current_result: Optional[CoachCurrentResult] = None
-    thinking_mode: Optional[str] = None
-
-
-class CoachResponse(BaseModel):
-    text: str
-
-
-class CoachChatRequest(BaseModel):
-    task_id: str
-    message: str
-    code: Optional[str] = None
-    submission_id: Optional[int] = None
-    current_result: Optional[CoachCurrentResult] = None
-    thinking_mode: Optional[str] = None
-
-
 class AgentCommandRequest(BaseModel):
     task_id: str
     command: str = "auto"
@@ -256,6 +288,9 @@ class AgentCommandRequest(BaseModel):
     submission_id: Optional[int] = None
     current_result: Optional[CoachCurrentResult] = None
     thinking_mode: Optional[str] = None
+
+
+AssistantRunRequest = AgentCommandRequest
 
 
 class AgentCommandInfo(BaseModel):
@@ -320,10 +355,6 @@ class AgentThreadResponse(BaseModel):
     messages: list[AgentThreadMessage]
 
 
-CoachMessage = AgentThreadMessage
-CoachThreadResponse = AgentThreadResponse
-
-
 class AgentMemoryItem(BaseModel):
     id: int
     user_id: str
@@ -359,6 +390,8 @@ class AgentProblemSearchResult(BaseModel):
     task_id: str
     question_id: int
     title: str
+    url: str
+    markdown_link: str
     difficulty: str
     tags: list[str]
     codetop_frequency: Optional[int] = None
@@ -376,6 +409,8 @@ class AgentRecommendationItem(BaseModel):
     task_id: str
     question_id: int
     title: str
+    url: Optional[str] = None
+    markdown_link: Optional[str] = None
     difficulty: str
     tags: list[str]
     codetop_frequency: Optional[int] = None

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 from collections.abc import Callable, Iterator
 from typing import Any, Protocol
@@ -7,11 +8,7 @@ from typing import Any, Protocol
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from .agent_api import (
-    AgentApiService,
-    agent_request_from_coach_chat_request,
-    agent_request_from_coach_request,
-)
+from .agent_api import AgentApiService
 from .agent_memory_api import AgentMemoryApiService, AgentMemoryNotFoundError
 from .agent_thread_api import AgentThreadApiService
 from .schemas import (
@@ -27,10 +24,7 @@ from .schemas import (
     AgentThreadResponse,
     AgentThreadSummaryResponse,
     AgentToolListResponse,
-    CoachChatRequest,
-    CoachRequest,
-    CoachResponse,
-    CoachThreadResponse,
+    AssistantRunRequest,
     PracticeNoteDraftRequest,
 )
 
@@ -69,6 +63,23 @@ def create_agent_router(
 
     def stream_response(content: Iterator[str]) -> StreamingResponse:
         return StreamingResponse(content, media_type="text/plain; charset=utf-8")
+
+    def assistant_event_response(request: AssistantRunRequest) -> StreamingResponse:
+        def events() -> Iterator[str]:
+            try:
+                for chunk in agent_api_service().stream_command(request):
+                    if chunk:
+                        yield _assistant_stream_event("text-delta", delta=chunk)
+                thread = agent_thread_api_service().thread_messages(request.task_id)
+                yield _assistant_stream_event(
+                    "thread-snapshot",
+                    messages=[_model_dump(message) for message in thread.messages],
+                )
+                yield _assistant_stream_event("done")
+            except Exception as exc:
+                yield _assistant_stream_event("error", message=str(exc))
+
+        return StreamingResponse(events(), media_type="application/x-ndjson; charset=utf-8")
 
     def set_memory_status_response(memory_id: int, status: str) -> AgentMemoryItem:
         try:
@@ -149,6 +160,18 @@ def create_agent_router(
         problem_loader(task_id)
         return agent_thread_api_service().clear_thread(task_id)
 
+    @router.get("/api/assistant/thread/{task_id}", response_model=AgentThreadResponse)
+    def get_assistant_thread(task_id: str) -> AgentThreadResponse:
+        return get_agent_thread(task_id)
+
+    @router.delete("/api/assistant/thread/{task_id}")
+    def clear_assistant_thread(task_id: str) -> dict[str, str]:
+        return clear_agent_thread(task_id)
+
+    @router.post("/api/assistant/run")
+    def assistant_run(request: AssistantRunRequest) -> StreamingResponse:
+        return assistant_event_response(request)
+
     @router.post("/api/agent/command/stream")
     def agent_command_stream(request: AgentCommandRequest) -> StreamingResponse:
         return stream_response(agent_api_service().stream_command(request))
@@ -172,36 +195,14 @@ def create_agent_router(
             )
         )
 
-    @router.post("/api/coach/diagnose", response_model=CoachResponse)
-    def diagnose(request: CoachRequest) -> CoachResponse:
-        raise HTTPException(status_code=410, detail="Use /api/coach/diagnose/stream")
-
-    @router.post("/api/coach/diagnose/stream")
-    def diagnose_stream(request: CoachRequest) -> StreamingResponse:
-        return stream_response(agent_api_service().stream_command(agent_request_from_coach_request(request, command="/diagnose")))
-
-    @router.post("/api/coach/explain", response_model=CoachResponse)
-    def explain(request: CoachRequest) -> CoachResponse:
-        raise HTTPException(status_code=410, detail="Use /api/coach/explain/stream")
-
-    @router.post("/api/coach/explain/stream")
-    def explain_stream(request: CoachRequest) -> StreamingResponse:
-        return stream_response(agent_api_service().stream_command(agent_request_from_coach_request(request, command="/explain")))
-
-    @router.get("/api/coach/thread/{task_id}", response_model=CoachThreadResponse)
-    def get_coach_thread(task_id: str) -> CoachThreadResponse:
-        return get_agent_thread(task_id)
-
-    @router.delete("/api/coach/thread/{task_id}")
-    def clear_coach_thread(task_id: str) -> dict[str, str]:
-        return clear_agent_thread(task_id)
-
-    @router.post("/api/coach/chat", response_model=CoachResponse)
-    def coach_chat(request: CoachChatRequest) -> CoachResponse:
-        raise HTTPException(status_code=410, detail="Use /api/coach/chat/stream")
-
-    @router.post("/api/coach/chat/stream")
-    def coach_chat_stream(request: CoachChatRequest) -> StreamingResponse:
-        return stream_response(agent_api_service().stream_command(agent_request_from_coach_chat_request(request)))
-
     return router
+
+
+def _assistant_stream_event(event_type: str, **payload: Any) -> str:
+    return f"{json.dumps({'type': event_type, **payload}, ensure_ascii=False)}\n"
+
+
+def _model_dump(item: Any) -> dict[str, Any]:
+    if hasattr(item, "model_dump"):
+        return item.model_dump()
+    return item.dict()

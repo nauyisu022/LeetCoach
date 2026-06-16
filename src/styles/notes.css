@@ -1,0 +1,281 @@
+.notes-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  container-type: inline-size;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.memory-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.notes-toolbar,
+.memory-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.notes-toolbar .section-title,
+.memory-toolbar .section-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.notes-scroll,
+.memory-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 12px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 2px;
+}
+
+.memory-scroll {
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.memory-group {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.memory-group-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.memory-group-head span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.memory-item {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px;
+}
+
+.memory-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.memory-meta span {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--primary-soft);
+  color: var(--primary-strong);
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.memory-meta small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-item p {
+  margin: 0;
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.memory-item textarea {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-muted);
+  color: var(--text);
+  padding: 8px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  outline: 0;
+}
+
+.memory-item textarea:focus {
+  border-color: var(--primary-border);
+  box-shadow: 0 0 0 2px rgba(47, 133, 90, 0.12);
+}
+
+.memory-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 7px;
+  min-width: 0;
+}
+
+.memory-empty {
+  border-radius: 8px;
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  padding: 12px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.notes-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.notes-meta span,
+.notes-meta small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.note-field-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.note-field-grid label,
+.note-markdown-field {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.note-field-grid span,
+.note-markdown-field span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.note-field-grid textarea,
+.note-markdown-field textarea {
+  width: 100%;
+  min-width: 0;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  padding: 8px;
+  color: var(--text);
+  font-family: inherit;
+  line-height: 1.45;
+  outline: 0;
+}
+
+.note-field-grid textarea {
+  min-height: 58px;
+  max-height: 110px;
+  font-size: 13px;
+}
+
+.note-markdown-field {
+  margin-top: 10px;
+}
+
+.note-markdown-field textarea {
+  min-height: 220px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+}
+
+.note-field-grid textarea:focus,
+.note-markdown-field textarea:focus {
+  border-color: var(--primary-border);
+  box-shadow: 0 0 0 2px rgba(47, 133, 90, 0.12);
+}
+
+.review-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 10px;
+}
+
+.review-row > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.topic-memory-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.topic-memory {
+  display: grid;
+  gap: 7px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.topic-memory > div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.topic-memory strong {
+  font-size: 13px;
+}
+
+.topic-memory small {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 700;
+}

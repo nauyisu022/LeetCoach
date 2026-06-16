@@ -107,7 +107,7 @@ def test_note_draft_stream_does_not_persist_until_saved(tmp_path, monkeypatch):
     note_response = client.get("/api/problems/two-sum/note")
     assert note_response.status_code == 200
     assert note_response.json()["note"] is None
-    thread_response = client.get("/api/coach/thread/two-sum")
+    thread_response = client.get("/api/assistant/thread/two-sum")
     assert thread_response.status_code == 200
     assert thread_response.json()["messages"] == []
 

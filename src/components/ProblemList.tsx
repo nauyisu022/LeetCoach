@@ -1,17 +1,31 @@
-import { CheckCircle2, Flame, Play, Search, Target, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { BookMarked, CheckCircle2, Flame, Play, Search, Target, X } from "lucide-react";
+import { type KeyboardEvent, useEffect, useMemo, useState } from "react";
 import { formatSlug } from "../lib/format";
 import { difficultyLabel, statusLabel } from "../lib/labels";
-import type { Filters, PracticeInsightsResponse, PracticeQueueResponse, ProblemSummary, ProblemTag } from "../types/api";
+import type {
+  Filters,
+  PracticeInsightsResponse,
+  PracticeQueueResponse,
+  ProblemSummary,
+  ProblemTag,
+  StudyPlanItemsResponse,
+  StudyPlanSummary
+} from "../types/api";
 
 type Props = {
   problems: ProblemSummary[];
   problemTags: ProblemTag[];
+  studyPlans?: StudyPlanSummary[];
+  activeStudyPlanSlug?: string;
+  activeStudyPlanGroupSlug?: string;
+  activeStudyPlanItems?: StudyPlanItemsResponse;
   practiceQueue?: PracticeQueueResponse;
   practiceInsights?: PracticeInsightsResponse;
   selectedTaskId?: string;
   filters: Filters;
   onFiltersChange: (filters: Filters) => void;
+  onStudyPlanChange?: (slug?: string) => void;
+  onStudyPlanGroupChange?: (groupSlug?: string) => void;
   onSelect: (taskId: string) => void;
   onNextPractice: () => void;
   onClose?: () => void;
@@ -76,11 +90,17 @@ function shortTopicLabel(tag: ProblemTag) {
 export function ProblemList({
   problems,
   problemTags,
+  studyPlans = [],
+  activeStudyPlanSlug,
+  activeStudyPlanGroupSlug,
+  activeStudyPlanItems,
   practiceQueue,
   practiceInsights,
   selectedTaskId,
   filters,
   onFiltersChange,
+  onStudyPlanChange,
+  onStudyPlanGroupChange,
   onSelect,
   onNextPractice,
   onClose
@@ -88,6 +108,9 @@ export function ProblemList({
   const selectedTags = useMemo(() => filters.tags ?? [], [filters.tags]);
   const [visibleProblemCount, setVisibleProblemCount] = useState(INITIAL_VISIBLE_PROBLEM_COUNT);
   const topInsight = practiceInsights?.topics[0];
+  const activeStudyPlan = activeStudyPlanItems?.plan ?? studyPlans.find((plan) => plan.slug === activeStudyPlanSlug);
+  const activeStudyPlanGroups = activeStudyPlanItems?.groups ?? [];
+  const selectedStudyPlanGroup = activeStudyPlanGroups.find((group) => group.group_slug === activeStudyPlanGroupSlug);
   const topicGroups = useMemo(
     () => problemTags.reduce<Array<{ category: string; label: string; count: number; tags: ProblemTag[] }>>(
       (groups, tag) => {
@@ -127,6 +150,22 @@ export function ProblemList({
     onFiltersChange({ ...filters, tags: nextTags.length ? nextTags : undefined });
   }
 
+  function handleProblemClick(problem: ProblemSummary) {
+    if (problem.available === false) {
+      if (problem.leetcode_url) {
+        window.open(problem.leetcode_url, "_blank", "noopener,noreferrer");
+      }
+      return;
+    }
+    onSelect(problem.task_id);
+  }
+
+  function handleProblemKeyDown(event: KeyboardEvent<HTMLDivElement>, problem: ProblemSummary) {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    handleProblemClick(problem);
+  }
+
   return (
     <aside className="sidebar problem-picker">
       <div className="brand">
@@ -142,6 +181,82 @@ export function ProblemList({
 
       <div className="picker-body">
         <div className="picker-controls">
+          <section className="study-plan-card" aria-label="题单筛选">
+            <div className="study-plan-head">
+              <span>
+                <BookMarked size={15} />
+                题单
+              </span>
+              {activeStudyPlan ? (
+                <small>
+                  已过 {activeStudyPlan.passed_count}/{activeStudyPlan.total_count}
+                  {activeStudyPlan.missing_count > 0 ? ` · 缺 ${activeStudyPlan.missing_count}` : ""}
+                </small>
+              ) : (
+                <small>{problems.length} 题</small>
+              )}
+            </div>
+            <div className="study-plan-tabs">
+              <button
+                type="button"
+                className={!activeStudyPlanSlug ? "selected" : ""}
+                onClick={() => onStudyPlanChange?.(undefined)}
+              >
+                全部题库
+              </button>
+              {studyPlans.map((plan) => (
+                <button
+                  type="button"
+                  className={activeStudyPlanSlug === plan.slug ? "selected" : ""}
+                  key={plan.slug}
+                  onClick={() => onStudyPlanChange?.(plan.slug)}
+                >
+                  {plan.title.replace(" 题", "")}
+                </button>
+              ))}
+            </div>
+            {activeStudyPlan && (
+              <div className="study-plan-progress">
+                <div>
+                  <strong>{Math.round(activeStudyPlan.progress * 100)}%</strong>
+                  <span>
+                    已通过 {activeStudyPlan.passed_count} · 需复习 {activeStudyPlan.needs_review_count} · 未开始 {activeStudyPlan.unseen_count}
+                  </span>
+                </div>
+                <div className="study-plan-progress-track" aria-hidden="true">
+                  <span style={{ width: `${Math.round(activeStudyPlan.progress * 100)}%` }} />
+                </div>
+              </div>
+            )}
+            {activeStudyPlanGroups.length > 0 && (
+              <div className="study-plan-groups" aria-label="题单分组">
+                <button
+                  type="button"
+                  className={!activeStudyPlanGroupSlug ? "selected" : ""}
+                  onClick={() => onStudyPlanGroupChange?.(undefined)}
+                >
+                  全部分组
+                  <small>{activeStudyPlan?.total_count ?? 0}</small>
+                </button>
+                {activeStudyPlanGroups.map((group) => (
+                  <button
+                    type="button"
+                    className={activeStudyPlanGroupSlug === group.group_slug ? "selected" : ""}
+                    key={group.group_slug}
+                    onClick={() => onStudyPlanGroupChange?.(group.group_slug)}
+                    title={`${group.group_name} · ${group.passed_count}/${group.total_count} 已过`}
+                  >
+                    {group.group_name}
+                    <small>
+                      {group.passed_count}/{group.total_count}
+                      {group.missing_count > 0 ? ` · 缺 ${group.missing_count}` : ""}
+                    </small>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+
           <div className="filter-box">
             <label className="search-field">
               <Search size={16} />
@@ -266,7 +381,7 @@ export function ProblemList({
 
         <section className="problem-results-panel">
           <div className="problem-list-head">
-            <span>题库结果</span>
+            <span>{activeStudyPlan ? `${activeStudyPlan.title}${selectedStudyPlanGroup ? ` · ${selectedStudyPlanGroup.group_name}` : ""}` : "题库结果"}</span>
             <strong>
               {visibleProblems.length < problems.length
                 ? `已显示 ${visibleProblems.length}/${problems.length} 题`
@@ -278,17 +393,21 @@ export function ProblemList({
               <span>#</span>
               <span>难度</span>
               <span>题目 / 考点</span>
-              <span>热度 / 状态</span>
+              <span>{activeStudyPlan ? "分组 / 状态" : "热度 / 状态"}</span>
             </div>
             {visibleProblems.map((problem) => {
               const topicLabels = problem.tags.map((tag) => tagLabelByName.get(tag) ?? tag);
               const visibleTopicLabels = topicLabels.slice(0, 3);
               const hiddenTopicCount = Math.max(topicLabels.length - visibleTopicLabels.length, 0);
               return (
-                <button
+                <div
                   key={problem.task_id}
-                  className={`problem-row ${selectedTaskId === problem.task_id ? "selected" : ""}`}
-                  onClick={() => onSelect(problem.task_id)}
+                  className={`problem-row ${selectedTaskId === problem.task_id ? "selected" : ""} ${problem.available === false ? "missing" : ""}`}
+                  onClick={() => handleProblemClick(problem)}
+                  onKeyDown={(event) => handleProblemKeyDown(event, problem)}
+                  role="button"
+                  tabIndex={0}
+                  title={problem.available === false ? "本地题库暂未补入，点击打开 LeetCode 原题" : undefined}
                 >
                   <span className="problem-row-number">{problem.question_id}</span>
                   <span className={`difficulty problem-row-difficulty ${problem.difficulty.toLowerCase()}`}>
@@ -297,6 +416,9 @@ export function ProblemList({
                   <div className="problem-row-main">
                     <div className="problem-title-line">
                       <strong className="problem-row-title">{problem.title || formatSlug(problem.task_id)}</strong>
+                      {problem.group_name && (
+                        <span className="problem-topic-pill plan-group">{problem.group_name}</span>
+                      )}
                       {visibleTopicLabels.length > 0 && (
                         <span className="problem-topic-pills" aria-label={`考点：${topicLabels.join("、")}`}>
                           {visibleTopicLabels.map((label) => (
@@ -313,12 +435,12 @@ export function ProblemList({
                     <span className="problem-row-heat">
                       <HeatBadge frequency={problem.codetop_frequency} compact />
                     </span>
-                    <span className="status">
+                    <span className={`status ${problem.status}`}>
                       {problem.status === "passed" && <CheckCircle2 size={13} />}
                       {statusLabel(problem.status)}
                     </span>
                   </div>
-                </button>
+                </div>
               );
             })}
             {hasMoreProblems && (

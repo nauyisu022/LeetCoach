@@ -1,0 +1,141 @@
+.app-shell {
+  display: block;
+  min-height: 100vh;
+}
+
+.drawer-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.drawer-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(31, 41, 51, 0.28);
+  backdrop-filter: blur(2px);
+}
+
+.problem-drawer {
+  position: relative;
+  z-index: 1;
+  width: min(1120px, calc(100vw - 48px));
+  height: min(820px, calc(100vh - 48px));
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(31, 41, 51, 0.22);
+  animation: drawer-in 180ms cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes drawer-in {
+  from {
+    transform: translateY(8px) scale(0.99);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-height: 100vh;
+  height: 100vh;
+  background: var(--surface);
+  padding: 16px;
+  gap: 10px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 2px 0 6px;
+}
+
+.brand > div:nth-child(2) {
+  min-width: 0;
+  flex: 1;
+}
+
+.brand-mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--text);
+  color: var(--surface);
+  font-weight: 800;
+  letter-spacing: 0;
+}
+
+.brand h1 {
+  margin: 0;
+  font-size: 21px;
+  line-height: 1.2;
+}
+
+.icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+.icon-button:hover {
+  background: var(--surface-muted);
+}
+
+.close-drawer {
+  flex: 0 0 auto;
+}
+
+.brand span,
+.topbar-main span,
+.editor-toolbar span,
+.result-header span,
+.problem-count {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.topbar-main span {
+  font-size: 12px;
+}
+
+.filter-box,
+.result-panel,
+.coach-panel {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+
+.problem-panel,
+.editor-panel,
+.test-dock,
+.learning-panel,
+.memory-panel,
+.notes-panel,
+.coach-panel {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--surface);
+}

@@ -44,6 +44,8 @@ def create_recommendation_set(
                 "task_id": item["task_id"],
                 "question_id": item["question_id"],
                 "title": item["title"],
+                "url": item.get("url"),
+                "markdown_link": item.get("markdown_link"),
                 "difficulty": item["difficulty"],
                 "tags": item.get("tags") or [],
                 "codetop_frequency": item.get("codetop_frequency"),

@@ -5,6 +5,7 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from typing import Any, Protocol, Sequence
+from urllib.parse import quote
 
 from ..notes import fetch_note, fetch_note_topics
 from ..practice import topic_names_for_problem
@@ -437,10 +438,9 @@ def _problem_search_prompt_section(payload: dict[str, Any]) -> str:
         lines.append(f"解释出的主题：{', '.join(interpreted_topics)}")
     for index, item in enumerate(results, start=1):
         tags = ", ".join(item.get("tags") or [])
-        title = item.get("title") or item.get("task_id")
-        task_id = item.get("task_id")
+        markdown_link = item.get("markdown_link") or f"{item.get('question_id')}. {item.get('title') or item.get('task_id')}"
         lines.append(
-            f"{index}. [{item.get('question_id')}. {title}](/problems/{task_id}) ({task_id})"
+            f"{index}. {markdown_link} ({item.get('task_id')})"
             f" | {item.get('difficulty')} | {tags}"
         )
     return "\n".join(lines)
@@ -608,14 +608,22 @@ def _search_problem_rows(
 
 def _problem_payload(row: sqlite3.Row) -> dict[str, Any]:
     raw_tags = json.loads(row["tags_json"])
+    title = row["title_zh"] or row["task_id"]
+    url = _problem_url(row["task_id"])
     return {
         "task_id": row["task_id"],
         "question_id": row["question_id"],
-        "title": row["title_zh"] or row["task_id"],
+        "title": title,
+        "url": url,
+        "markdown_link": f"[{row['question_id']}. {title}]({url})",
         "difficulty": row["difficulty"],
         "tags": display_topic_labels(raw_tags),
         "codetop_frequency": row["codetop_frequency"],
     }
+
+
+def _problem_url(task_id: str) -> str:
+    return f"/problems/{quote(task_id, safe='')}"
 
 
 def _interpreted_topics(query: str, current_topics: list[str]) -> list[str]:

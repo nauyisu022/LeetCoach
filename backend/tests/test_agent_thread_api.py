@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+import json
 
 from app.agent_thread_api import AgentThreadApiService
 from app.db import get_connection, init_db
@@ -95,7 +96,7 @@ def test_agent_thread_api_reads_ordered_messages_and_clears_only_selected_thread
     ]
 
 
-def test_agent_thread_routes_preferred_path_and_coach_compatibility(tmp_path, monkeypatch):
+def test_agent_thread_routes_preferred_path_and_coach_legacy_removed(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
     _init_thread_db(db_path)
@@ -109,13 +110,63 @@ def test_agent_thread_routes_preferred_path_and_coach_compatibility(tmp_path, mo
     with TestClient(app) as client:
         agent_response = client.get("/api/agent/thread/two-sum")
         coach_response = client.get("/api/coach/thread/two-sum")
+        coach_stream_response = client.post(
+            "/api/coach/chat/stream",
+            json={"task_id": "two-sum", "message": "hi"},
+        )
         clear_response = client.delete("/api/agent/thread/two-sum")
         empty_response = client.get("/api/agent/thread/two-sum")
 
     assert agent_response.status_code == 200
     assert [message["content"] for message in agent_response.json()["messages"]] == ["first", "second"]
-    assert coach_response.status_code == 200
-    assert coach_response.json() == agent_response.json()
+    assert coach_response.status_code == 404
+    assert coach_stream_response.status_code == 404
     assert clear_response.status_code == 200
     assert clear_response.json() == {"status": "cleared"}
     assert empty_response.json()["messages"] == []
+
+
+def test_assistant_thread_routes_stream_runtime_events_and_persist_turn(tmp_path, monkeypatch):
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
+    _init_thread_db(db_path)
+    conn = get_connection(db_path)
+    with conn:
+        _insert_problem(conn)
+    conn.close()
+
+    from app import main
+    from app.main import app
+
+    def fake_stream(messages, **kwargs):
+        assert kwargs["thinking_mode"] == "disabled"
+        assert messages[-1]["role"] == "user"
+        yield "hello"
+        yield " world"
+
+    monkeypatch.setattr(main, "agent_model_streamer", fake_stream)
+
+    with TestClient(app) as client:
+        thread_response = client.get("/api/assistant/thread/two-sum")
+        stream_response = client.post(
+            "/api/assistant/run",
+            json={
+                "task_id": "two-sum",
+                "command": "auto",
+                "message": "hi",
+                "thinking_mode": "disabled",
+            },
+        )
+        persisted_response = client.get("/api/assistant/thread/two-sum")
+        clear_response = client.delete("/api/assistant/thread/two-sum")
+
+    assert thread_response.status_code == 200
+    assert [message["content"] for message in thread_response.json()["messages"]] == ["first", "second"]
+    assert stream_response.status_code == 200
+    events = [json.loads(line) for line in stream_response.text.splitlines()]
+    assert events[0] == {"type": "text-delta", "delta": "hello"}
+    assert events[1] == {"type": "text-delta", "delta": " world"}
+    assert events[-1] == {"type": "done"}
+    assert events[-2]["type"] == "thread-snapshot"
+    assert [message["content"] for message in persisted_response.json()["messages"]][-2:] == ["hi", "hello world"]
+    assert clear_response.json() == {"status": "cleared"}

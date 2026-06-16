@@ -74,6 +74,44 @@ def _init_catalog_db(conn: sqlite3.Connection) -> None:
         CREATE INDEX IF NOT EXISTS idx_problems_question_id ON problems(question_id);
         CREATE INDEX IF NOT EXISTS idx_problems_difficulty ON problems(difficulty);
 
+        CREATE TABLE IF NOT EXISTS study_plans (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            slug TEXT NOT NULL UNIQUE,
+            title TEXT NOT NULL,
+            source_type TEXT NOT NULL,
+            source_url TEXT NOT NULL,
+            description TEXT,
+            fetched_at TEXT,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+
+        CREATE TABLE IF NOT EXISTS study_plan_items (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            plan_id INTEGER NOT NULL REFERENCES study_plans(id) ON DELETE CASCADE,
+            task_id TEXT NOT NULL,
+            external_slug TEXT NOT NULL,
+            question_id INTEGER NOT NULL,
+            title TEXT NOT NULL,
+            difficulty TEXT NOT NULL,
+            group_name TEXT NOT NULL,
+            group_slug TEXT NOT NULL,
+            group_position INTEGER NOT NULL,
+            item_position INTEGER NOT NULL,
+            plan_position INTEGER NOT NULL,
+            paid_only INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(plan_id, external_slug)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_study_plan_items_plan_position
+          ON study_plan_items(plan_id, group_position, item_position);
+        CREATE INDEX IF NOT EXISTS idx_study_plan_items_task_id
+          ON study_plan_items(task_id);
+        CREATE INDEX IF NOT EXISTS idx_study_plan_items_group
+          ON study_plan_items(plan_id, group_slug);
+
         CREATE TABLE IF NOT EXISTS codetop_questions (
             codetop_id INTEGER PRIMARY KEY,
             leetcode_id INTEGER,

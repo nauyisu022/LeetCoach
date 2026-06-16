@@ -2,6 +2,7 @@ import type {
   AgentCommandListResponse,
   AgentCommandPreviewResponse,
   AgentCommandRequest,
+  AssistantRunEvent,
   AgentMemoryItem,
   AgentMemoryListResponse,
   AgentMemoryStatus,
@@ -24,6 +25,8 @@ import type {
   ProblemTag,
   ProgressSummary,
   SavedSolution,
+  StudyPlanItemsResponse,
+  StudyPlanListResponse,
   SubmissionHistoryItem,
   SubmissionResponse,
   ThinkingMode,
@@ -123,6 +126,80 @@ async function streamRequest(path: string, init: RequestInit, onChunk: (chunk: s
   }
 }
 
+async function* eventStreamRequest<TEvent>(path: string, init: RequestInit): AsyncGenerator<TEvent, void> {
+  const controller = new AbortController();
+  const externalSignal = init.signal;
+  let timedOut = false;
+  let receivedFirstEvent = false;
+  function abortFromExternalSignal() {
+    controller.abort();
+  }
+
+  if (externalSignal?.aborted) {
+    controller.abort();
+  } else {
+    externalSignal?.addEventListener("abort", abortFromExternalSignal, { once: true });
+  }
+
+  const firstEventTimer = window.setTimeout(() => {
+    if (receivedFirstEvent) return;
+    timedOut = true;
+    controller.abort();
+  }, AI_FIRST_CHUNK_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(path, {
+      ...init,
+      signal: controller.signal,
+      headers: {
+        "Content-Type": "application/json",
+        ...(init.headers ?? {})
+      }
+    });
+    if (!response.ok) {
+      const message = await response.text();
+      throw new Error(message || response.statusText);
+    }
+    if (!response.body) return;
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (!receivedFirstEvent) {
+          receivedFirstEvent = true;
+          window.clearTimeout(firstEventTimer);
+        }
+        yield JSON.parse(trimmed) as TEvent;
+      }
+    }
+
+    buffer += decoder.decode();
+    const tail = buffer.trim();
+    if (tail) {
+      if (!receivedFirstEvent) receivedFirstEvent = true;
+      yield JSON.parse(tail) as TEvent;
+    }
+  } catch (err) {
+    if (timedOut) {
+      throw new Error("AI 响应超过 45 秒没有输出，已取消。请稍后重试。");
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(firstEventTimer);
+    externalSignal?.removeEventListener("abort", abortFromExternalSignal);
+  }
+}
+
 export function fetchProblems(filters: Filters): Promise<ProblemSummary[]> {
   const params = new URLSearchParams();
   params.set("limit", String(PROBLEM_LIST_LIMIT));
@@ -140,6 +217,30 @@ export function fetchProblems(filters: Filters): Promise<ProblemSummary[]> {
 
 export function fetchProblemTags(): Promise<ProblemTag[]> {
   return request("/api/problem-tags");
+}
+
+export function fetchStudyPlans(): Promise<StudyPlanListResponse> {
+  return request("/api/study-plans");
+}
+
+export function fetchStudyPlanItems(
+  slug: string,
+  filters: Filters,
+  groupSlug?: string
+): Promise<StudyPlanItemsResponse> {
+  const params = new URLSearchParams();
+  params.set("limit", String(PROBLEM_LIST_LIMIT));
+  if (groupSlug) params.set("group_slug", groupSlug);
+  Object.entries(filters).forEach(([key, value]) => {
+    if (Array.isArray(value)) {
+      value.forEach((item) => {
+        if (item) params.append(key, item);
+      });
+    } else if (value) {
+      params.set(key, value);
+    }
+  });
+  return request(`/api/study-plans/${encodeURIComponent(slug)}?${params.toString()}`);
 }
 
 export function fetchProgressSummary(): Promise<ProgressSummary> {
@@ -324,12 +425,26 @@ export function clearAgentThread(taskId: string): Promise<{ status: string }> {
   return request(`/api/agent/thread/${taskId}`, { method: "DELETE" });
 }
 
-export function fetchCoachThread(taskId: string): Promise<AgentThreadResponse> {
-  return fetchAgentThread(taskId);
+export function fetchAssistantThread(taskId: string): Promise<AgentThreadResponse> {
+  return request(`/api/assistant/thread/${taskId}`);
 }
 
-export function clearCoachThread(taskId: string): Promise<{ status: string }> {
-  return clearAgentThread(taskId);
+export function clearAssistantThread(taskId: string): Promise<{ status: string }> {
+  return request(`/api/assistant/thread/${taskId}`, { method: "DELETE" });
+}
+
+export function streamAssistantRun(
+  payload: AgentCommandRequest,
+  signal?: AbortSignal
+): AsyncGenerator<AssistantRunEvent, void> {
+  return eventStreamRequest<AssistantRunEvent>(
+    "/api/assistant/run",
+    {
+      method: "POST",
+      signal,
+      body: JSON.stringify(payload)
+    }
+  );
 }
 
 export function searchAgentProblems(query: string, currentTaskId?: string, limit = 8): Promise<AgentProblemSearchResponse> {

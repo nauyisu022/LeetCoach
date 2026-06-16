@@ -10,6 +10,56 @@ export type ProblemSummary = {
   last_submitted_at: string | null;
   codetop_frequency: number | null;
   codetop_last_asked_at: string | null;
+  study_plan_slug?: string;
+  group_name?: string;
+  group_slug?: string;
+  group_position?: number;
+  item_position?: number;
+  plan_position?: number;
+  paid_only?: boolean;
+  available?: boolean;
+  external_slug?: string;
+  leetcode_url?: string;
+};
+
+export type StudyPlanSummary = {
+  id: number;
+  slug: string;
+  title: string;
+  source_type: string;
+  source_url: string;
+  description: string | null;
+  fetched_at: string | null;
+  total_count: number;
+  available_count: number;
+  missing_count: number;
+  passed_count: number;
+  needs_review_count: number;
+  unseen_count: number;
+  progress: number;
+};
+
+export type StudyPlanGroupSummary = {
+  group_name: string;
+  group_slug: string;
+  group_position: number;
+  total_count: number;
+  available_count: number;
+  missing_count: number;
+  passed_count: number;
+  needs_review_count: number;
+  unseen_count: number;
+};
+
+export type StudyPlanItemsResponse = {
+  plan: StudyPlanSummary;
+  groups: StudyPlanGroupSummary[];
+  items: ProblemSummary[];
+  next_task_id: string | null;
+};
+
+export type StudyPlanListResponse = {
+  plans: StudyPlanSummary[];
 };
 
 export type ProgressSummary = {
@@ -142,6 +192,12 @@ export type AgentCommandRequest = {
   current_result?: CoachCurrentResult;
   thinking_mode?: ThinkingMode;
 };
+
+export type AssistantRunEvent =
+  | { type: "text-delta"; delta: string }
+  | { type: "thread-snapshot"; messages: AgentThreadMessage[] }
+  | { type: "done" }
+  | { type: "error"; message: string };
 
 export type AgentToolRunPreview = {
   name: string;
@@ -287,8 +343,6 @@ export type AgentThreadResponse = {
   messages: AgentThreadMessage[];
 };
 
-export type CoachMessage = AgentThreadMessage;
-
 export type ThinkingMode = "enabled" | "disabled";
 
 export type AgentMemoryStatus = "proposed" | "accepted" | "rejected" | "archived";
@@ -321,6 +375,8 @@ export type AgentProblemSearchResult = {
   task_id: string;
   question_id: number;
   title: string;
+  url: string;
+  markdown_link: string;
   difficulty: string;
   tags: string[];
   codetop_frequency?: number | null;
@@ -338,6 +394,8 @@ export type AgentRecommendationItem = {
   task_id: string;
   question_id: number;
   title: string;
+  url?: string | null;
+  markdown_link?: string | null;
   difficulty: string;
   tags: string[];
   codetop_frequency?: number | null;

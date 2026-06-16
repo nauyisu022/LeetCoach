@@ -8,7 +8,7 @@ Required context:
 - current topics and learner progress when available
 
 Output contract:
-- list relevant local catalog problems
+- list relevant local catalog problems; keep each problem label as a Markdown link from the tool result, for example `[46. 全排列](/problems/permutations)`
 - explain why each one is related
 - recommend an order to practice
 - ask whether the user wants one selected problem explained

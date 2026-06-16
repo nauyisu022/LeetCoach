@@ -10,5 +10,6 @@ export function statusLabel(status: string): string {
   if (status === "needs_review") return "需复习";
   if (status === "passed") return "已通过";
   if (status === "attempted") return "已尝试";
+  if (status === "missing") return "待补入";
   return status.replace("_", " ");
 }

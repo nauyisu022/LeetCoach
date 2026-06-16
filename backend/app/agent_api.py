@@ -36,8 +36,6 @@ from .schemas import (
     AgentProfileResponse,
     AgentToolInfo,
     AgentToolListResponse,
-    CoachChatRequest,
-    CoachRequest,
 )
 
 
@@ -147,29 +145,6 @@ class AgentApiService:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         finally:
             conn.close()
-
-
-def agent_request_from_coach_request(request: CoachRequest, *, command: str) -> AgentCommandRequest:
-    return AgentCommandRequest(
-        task_id=request.task_id,
-        command=command,
-        code=request.code,
-        submission_id=request.submission_id,
-        current_result=request.current_result,
-        thinking_mode=request.thinking_mode,
-    )
-
-
-def agent_request_from_coach_chat_request(request: CoachChatRequest) -> AgentCommandRequest:
-    return AgentCommandRequest(
-        task_id=request.task_id,
-        command="auto",
-        message=request.message,
-        code=request.code,
-        submission_id=request.submission_id,
-        current_result=request.current_result,
-        thinking_mode=request.thinking_mode,
-    )
 
 
 def _recommendation_set_from_record(record: AgentArtifactRecord | None) -> AgentRecommendationSet | None:

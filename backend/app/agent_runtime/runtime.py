@@ -262,7 +262,8 @@ def _plan_search_command(plan_input: CommandPlanInput) -> AgentCommandPlan:
                 "content": (
                     f"{_join_sections(plan_input.skill_section, context, plan_input.tool_section)}\n\n"
                     "用户正在让你找题或推荐题。必须优先基于上面的本地题库工具结果回答；"
-                    "不要编造工具结果里没有的题目。请说明每道题为什么相关，并建议先做哪一道。\n"
+                    "不要编造工具结果里没有的题目。每道题的题号和标题必须保留工具结果里的 Markdown 内部链接；"
+                    "请说明每道题为什么相关，并建议先做哪一道。\n"
                     f"用户问题：{user_content}"
                 ),
             },

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Iterator, Sequence
+import re
+from collections.abc import Callable, Iterator, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -50,15 +51,25 @@ def stream_agent_turn(
     turn: AgentStreamTurn,
     *,
     ai_streamer: AIStreamer = stream_agent_model_messages,
+    text_transform: Callable[[str], str] | None = None,
+    emit_chunks: bool = True,
 ) -> Iterator[str]:
     chunks: list[str] = []
     for chunk in ai_streamer(turn.messages, thinking_mode=turn.thinking_mode):
         chunks.append(chunk)
-        yield chunk
+        if emit_chunks:
+            yield chunk
 
     text = "".join(chunks).strip()
     if not text:
         text = AI_EMPTY_RESPONSE_TEXT
+        if emit_chunks:
+            yield text
+
+    if text_transform:
+        text = text_transform(text)
+
+    if not emit_chunks:
         yield text
 
     user_message_id = append_coach_message(turn.user_id, turn.task_id, "user", turn.user_content)
@@ -78,22 +89,21 @@ def stream_agent_turn(
         update_submission_ai_summary(turn.user_id, turn.submission_id, text)
 
 
-CoachStreamTurn = AgentStreamTurn
-
-
-def stream_coach_turn(
-    turn: AgentStreamTurn,
-    *,
-    ai_streamer: AIStreamer = stream_agent_model_messages,
-) -> Iterator[str]:
-    return stream_agent_turn(turn, ai_streamer=ai_streamer)
-
-
 def stream_agent_invocation(
     invocation: AgentInvocation,
     *,
     ai_streamer: AIStreamer = stream_agent_model_messages,
 ) -> Iterator[str]:
+    search_result = _successful_problem_search_result(invocation)
+    text_transform = None
+    emit_chunks = True
+    if invocation.plan.command == "/search-problems" and search_result:
+        text_transform = lambda text: link_problem_references_as_markdown_urls(
+            text,
+            search_result.payload.get("results") or [],
+        )
+        emit_chunks = False
+
     yield from stream_agent_turn(
         AgentStreamTurn(
             user_id=invocation.turn.user_id,
@@ -107,6 +117,8 @@ def stream_agent_invocation(
             hooks=invocation.config.hooks,
         ),
         ai_streamer=ai_streamer,
+        text_transform=text_transform,
+        emit_chunks=emit_chunks,
     )
     persist_agent_artifacts(invocation)
 
@@ -166,31 +178,6 @@ def run_after_agent_turn_hooks(
     conn.close()
 
 
-def run_after_coach_turn_hooks(
-    *,
-    user_id: str,
-    task_id: str,
-    command: str,
-    problem: dict[str, Any],
-    user_content: str,
-    assistant_text: str,
-    user_message_id: int,
-    assistant_message_id: int,
-    hooks: Sequence[AgentHook] | None = None,
-) -> None:
-    run_after_agent_turn_hooks(
-        user_id=user_id,
-        task_id=task_id,
-        command=command,
-        problem=problem,
-        user_content=user_content,
-        assistant_text=assistant_text,
-        user_message_id=user_message_id,
-        assistant_message_id=assistant_message_id,
-        hooks=hooks,
-    )
-
-
 def update_submission_ai_summary(user_id: str, submission_id: int, text: str) -> None:
     conn = get_connection()
     with conn:
@@ -201,13 +188,89 @@ def update_submission_ai_summary(user_id: str, submission_id: int, text: str) ->
     conn.close()
 
 
-def persist_agent_artifacts(invocation: AgentInvocation) -> None:
-    if invocation.plan.command != "/search-problems":
-        return
-    search_result = next(
+def _successful_problem_search_result(invocation: AgentInvocation):
+    return next(
         (result for result in invocation.context.tool_results if result.name == "problem_search" and result.ok),
         None,
     )
+
+
+def link_problem_references_as_markdown_urls(text: str, results: list[dict[str, Any]]) -> str:
+    problem_by_question_id: dict[int, dict[str, Any]] = {}
+    for item in results:
+        try:
+            question_id = int(item.get("question_id"))
+        except (TypeError, ValueError):
+            continue
+        problem_by_question_id[question_id] = item
+
+    if not problem_by_question_id:
+        return text
+
+    pattern = re.compile(r"\b(\d{1,5})\.(?!\d)")
+    output: list[str] = []
+    last_index = 0
+
+    for match in pattern.finditer(text):
+        problem = problem_by_question_id.get(int(match.group(1)))
+        if not problem or _already_markdown_linked(text, match.start()):
+            continue
+
+        match_end = match.end()
+        extra_length = _problem_title_match_length(text[match_end:], str(problem.get("title") or ""))
+        if extra_length is None:
+            continue
+
+        output.append(text[last_index:match.start()])
+        link_end = match_end + extra_length
+        label = text[match.start():link_end]
+        output.append(_markdown_link_from_tool_result(problem, label))
+        last_index = link_end
+
+    if last_index == 0:
+        return text
+    output.append(text[last_index:])
+    return "".join(output)
+
+
+def _already_markdown_linked(text: str, match_start: int) -> bool:
+    if match_start > 0 and text[match_start - 1] == "[":
+        return True
+    line_start = text.rfind("\n", 0, match_start) + 1
+    preceding_line = text[line_start:match_start]
+    return "[" in preceding_line and "](" not in preceding_line
+
+
+def _markdown_link_from_tool_result(problem: dict[str, Any], fallback_label: str) -> str:
+    markdown_link = problem.get("markdown_link")
+    if isinstance(markdown_link, str) and markdown_link.strip():
+        return markdown_link
+
+    url = problem.get("url")
+    if isinstance(url, str) and url.strip():
+        title = str(problem.get("title") or "").strip()
+        label = f"{problem.get('question_id')}. {title}" if title else fallback_label
+        return f"[{label}]({url})"
+
+    return fallback_label
+
+
+def _problem_title_match_length(text_after_number: str, title: str) -> int | None:
+    if re.match(r"\s+\d{1,5}\.(?!\d)", text_after_number):
+        return None
+
+    leading_whitespace_match = re.match(r"\s*", text_after_number)
+    leading_whitespace = leading_whitespace_match.group(0) if leading_whitespace_match else ""
+    candidate = text_after_number[len(leading_whitespace):]
+    if title and candidate.startswith(title):
+        return len(leading_whitespace) + len(title)
+    return 0
+
+
+def persist_agent_artifacts(invocation: AgentInvocation) -> None:
+    if invocation.plan.command != "/search-problems":
+        return
+    search_result = _successful_problem_search_result(invocation)
     if not search_result:
         return
     payload = search_result.payload

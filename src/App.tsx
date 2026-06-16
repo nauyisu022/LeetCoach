@@ -12,11 +12,8 @@ import { RecommendationTrail } from "./components/RecommendationTrail";
 import { TestDock } from "./components/TestDock";
 import {
   acceptAgentMemory,
-  clearAgentThread,
   fetchAgentCommands,
   fetchAgentMemories,
-  fetchAgentThread,
-  fetchLatestRecommendationSet,
   fetchProblem,
   fetchProblems,
   fetchProblemTags,
@@ -24,6 +21,8 @@ import {
   fetchPracticeNote,
   fetchPracticeInsights,
   fetchPracticeQueue,
+  fetchStudyPlanItems,
+  fetchStudyPlans,
   fetchSubmissionHistory,
   fetchTopicMemories,
   previewAgentCommand,
@@ -31,18 +30,21 @@ import {
   reviewPracticeNote,
   runCode,
   savePracticeNote,
-  saveSolution,
-  streamAgentCommand,
   streamPracticeNoteDraft,
   submitCode,
   updateAgentMemory
 } from "./lib/api";
+import {
+  useCompactLayout,
+  problemTaskIdFromPath,
+  useProblemSelection,
+  useRecommendationRefresh,
+  useSolutionAutosave
+} from "./hooks";
 import type {
   AgentMemoryItem,
   AgentCommandInfo,
   AgentCommandPreviewResponse,
-  AgentRecommendationSet,
-  AgentThreadMessage,
   CustomTestCase,
   DisplaySubmissionResponse,
   Filters,
@@ -56,6 +58,8 @@ import type {
   ProblemTag,
   ProblemSummary,
   ProgressSummary,
+  StudyPlanItemsResponse,
+  StudyPlanSummary,
   SubmissionHistoryItem,
   SubmissionResponse,
   ThinkingMode,
@@ -64,7 +68,6 @@ import type {
 
 setSashSize(10);
 
-const AUTO_SAVE_DELAY_MS = 5000;
 const RUN_CASE_CONCURRENCY = 4;
 const FALLBACK_CUSTOM_INPUT = "nums = [2,7,11,15]\ntarget = 9";
 const SELECTED_TASK_STORAGE_KEY = "leetcoach:selected-task-id";
@@ -72,9 +75,9 @@ const AI_THINKING_STORAGE_KEY = "leetcoach:ai-thinking-mode";
 const ACTIVE_RECOMMENDATION_SOURCE_STORAGE_KEY = "leetcoach:active-recommendation-source-task-id";
 
 const FALLBACK_COACH_COMMANDS: CoachCommandAction[] = [
-  { command: "/explain", label: "讲解", icon: "explain" },
-  { command: "/diagnose", label: "诊断", icon: "diagnose" },
-  { command: "/search-problems", label: "找题", icon: "search" }
+  { command: "/explain", label: "讲解", icon: "explain", defaultMessage: "讲讲这题的核心思路。" },
+  { command: "/diagnose", label: "诊断", icon: "diagnose", defaultMessage: "帮我诊断当前代码/运行结果。" },
+  { command: "/search-problems", label: "找题", icon: "search", defaultMessage: "有哪些经典题和同类练习？" }
 ];
 
 type RunCaseResult = { case: CustomTestCase; response: SubmissionResponse };
@@ -204,6 +207,10 @@ export function App() {
   const [filters, setFilters] = useState<Filters>({});
   const [problems, setProblems] = useState<ProblemSummary[]>([]);
   const [problemTags, setProblemTags] = useState<ProblemTag[]>([]);
+  const [studyPlans, setStudyPlans] = useState<StudyPlanSummary[]>([]);
+  const [activeStudyPlanSlug, setActiveStudyPlanSlug] = useState<string | undefined>();
+  const [activeStudyPlanGroupSlug, setActiveStudyPlanGroupSlug] = useState<string | undefined>();
+  const [activeStudyPlanItems, setActiveStudyPlanItems] = useState<StudyPlanItemsResponse>();
   const [progressSummary, setProgressSummary] = useState<ProgressSummary>();
   const [practiceQueue, setPracticeQueue] = useState<PracticeQueueResponse>();
   const [practiceInsights, setPracticeInsights] = useState<PracticeInsightsResponse>();
@@ -211,13 +218,14 @@ export function App() {
   const [topicMemories, setTopicMemories] = useState<TopicMemory[]>([]);
   const [agentMemories, setAgentMemories] = useState<AgentMemoryItem[]>([]);
   const [agentCommands, setAgentCommands] = useState<AgentCommandInfo[]>([]);
-  const [activeRecommendationSourceTaskId, setActiveRecommendationSourceTaskId] = useState<string | null>(() => (
-    window.localStorage.getItem(ACTIVE_RECOMMENDATION_SOURCE_STORAGE_KEY)
-  ));
-  const [activeRecommendationSet, setActiveRecommendationSet] = useState<AgentRecommendationSet | null>(null);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>(() => (
-    window.localStorage.getItem(SELECTED_TASK_STORAGE_KEY) ?? undefined
-  ));
+  const [error, setError] = useState<string>();
+  const { activeRecommendationSet, refreshRecommendationForTask } = useRecommendationRefresh({
+    storageKey: ACTIVE_RECOMMENDATION_SOURCE_STORAGE_KEY,
+    onError: setError
+  });
+  const { selectedTaskId, setSelectedTaskId, hasBootstrappedSelectionRef } = useProblemSelection(
+    SELECTED_TASK_STORAGE_KEY
+  );
   const [problem, setProblem] = useState<ProblemDetail>();
   const [code, setCode] = useState("");
   const [result, setResult] = useState<DisplaySubmissionResponse>();
@@ -226,32 +234,39 @@ export function App() {
   const [isHistoryLoading, setHistoryLoading] = useState(false);
   const [customCases, setCustomCases] = useState<CustomTestCase[]>(() => customCasesFromExamples([]));
   const [selectedCaseId, setSelectedCaseId] = useState("case-1");
-  const [coachMessages, setCoachMessages] = useState<AgentThreadMessage[]>([]);
   const [thinkingMode, setThinkingMode] = useState<ThinkingMode>(() => (
     window.localStorage.getItem(AI_THINKING_STORAGE_KEY) === "disabled" ? "disabled" : "enabled"
   ));
   const [isRunning, setIsRunning] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isSavingSolution, setSavingSolution] = useState(false);
   const [isNoteLoading, setNoteLoading] = useState(false);
   const [isSavingNote, setSavingNote] = useState(false);
   const [isDraftingNote, setDraftingNote] = useState(false);
   const [isMemoryLoading, setMemoryLoading] = useState(false);
   const [updatingMemoryId, setUpdatingMemoryId] = useState<number | null>(null);
-  const [solutionDirty, setSolutionDirty] = useState(false);
-  const [solutionSavedAt, setSolutionSavedAt] = useState<string>();
-  const [isCoachLoading, setCoachLoading] = useState(false);
   const [isAgentPreviewLoading, setAgentPreviewLoading] = useState(false);
   const [agentPreview, setAgentPreview] = useState<string | null>(null);
-  const [error, setError] = useState<string>();
+  const [queuedCoachCommand, setQueuedCoachCommand] = useState<{ id: number; command: string } | null>(null);
   const [isProblemDrawerOpen, setProblemDrawerOpen] = useState(false);
   const [learningTab, setLearningTab] = useState<"coach" | "notes" | "memory">("coach");
-  const [isCompactLayout, setCompactLayout] = useState(() => window.innerWidth < 1240);
+  const isCompactLayout = useCompactLayout();
   const testInputRef = useRef<HTMLTextAreaElement | null>(null);
-  const draftRef = useRef<{ taskId?: string; code: string; dirty: boolean }>({ code: "", dirty: false });
-  const autoSaveTimerRef = useRef<number | undefined>(undefined);
-  const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve());
-  const coachAbortRef = useRef<AbortController | null>(null);
+  const {
+    isSavingSolution,
+    solutionDirty,
+    solutionSavedAt,
+    handleCodeChange,
+    handleSaveSolution,
+    saveDirtyDraftNow,
+    clearSolutionDraft,
+    resetSolutionDraft,
+    markDraftSaved
+  } = useSolutionAutosave({
+    problem,
+    code,
+    setCode,
+    onError: setError
+  });
 
   const refreshAgentMemoryList = useCallback(async (taskId: string, options?: { showLoading?: boolean }) => {
     if (options?.showLoading) setMemoryLoading(true);
@@ -266,20 +281,39 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    fetchProblems(filters)
-      .then((items) => {
+    let isCurrent = true;
+    const request = activeStudyPlanSlug
+      ? fetchStudyPlanItems(activeStudyPlanSlug, filters, activeStudyPlanGroupSlug)
+      : fetchProblems(filters);
+    request
+      .then((response) => {
+        if (!isCurrent) return;
+        const items = Array.isArray(response) ? response : response.items;
+        setActiveStudyPlanItems(Array.isArray(response) ? undefined : response);
         setProblems(items);
-        if (!items.length) return;
-        if (!selectedTaskId || !items.some((item) => item.task_id === selectedTaskId)) {
-          setSelectedTaskId(items[0].task_id);
+        const selectableItems = items.filter((item) => item.available !== false);
+        if (!hasBootstrappedSelectionRef.current && selectableItems.length) {
+          hasBootstrappedSelectionRef.current = true;
+          setSelectedTaskId(selectableItems[0].task_id, "replace");
         }
       })
-      .catch((err: Error) => setError(err.message));
-  }, [filters, selectedTaskId]);
+      .catch((err: Error) => {
+        if (isCurrent) setError(err.message);
+      });
+    return () => {
+      isCurrent = false;
+    };
+  }, [activeStudyPlanGroupSlug, activeStudyPlanSlug, filters, hasBootstrappedSelectionRef, setSelectedTaskId]);
 
   useEffect(() => {
     fetchProblemTags()
       .then(setProblemTags)
+      .catch((err: Error) => setError(err.message));
+  }, []);
+
+  useEffect(() => {
+    fetchStudyPlans()
+      .then((response) => setStudyPlans(response.plans))
       .catch((err: Error) => setError(err.message));
   }, []);
 
@@ -314,44 +348,12 @@ export function App() {
   }, [result]);
 
   useEffect(() => {
-    if (selectedTaskId) {
-      window.localStorage.setItem(SELECTED_TASK_STORAGE_KEY, selectedTaskId);
-    } else {
-      window.localStorage.removeItem(SELECTED_TASK_STORAGE_KEY);
-    }
     setAgentPreview(null);
   }, [selectedTaskId]);
 
   useEffect(() => {
     window.localStorage.setItem(AI_THINKING_STORAGE_KEY, thinkingMode);
   }, [thinkingMode]);
-
-  useEffect(() => {
-    if (activeRecommendationSourceTaskId) {
-      window.localStorage.setItem(ACTIVE_RECOMMENDATION_SOURCE_STORAGE_KEY, activeRecommendationSourceTaskId);
-    } else {
-      window.localStorage.removeItem(ACTIVE_RECOMMENDATION_SOURCE_STORAGE_KEY);
-    }
-  }, [activeRecommendationSourceTaskId]);
-
-  useEffect(() => {
-    if (!activeRecommendationSourceTaskId) {
-      setActiveRecommendationSet(null);
-      return;
-    }
-    let isCurrent = true;
-    fetchLatestRecommendationSet(activeRecommendationSourceTaskId)
-      .then((response) => {
-        if (isCurrent) setActiveRecommendationSet(response.recommendation_set);
-      })
-      .catch((err: Error) => {
-        if (isCurrent) setError(err.message);
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [activeRecommendationSourceTaskId]);
 
   useEffect(() => {
     fetchPracticeQueue(filters, selectedTaskId)
@@ -395,9 +397,7 @@ export function App() {
     if (!selectedTaskId) return;
     let isCurrent = true;
     setProblem(undefined);
-    setCode("");
-    setSolutionSavedAt(undefined);
-    setSolutionDirty(false);
+    clearSolutionDraft();
     setResult(undefined);
     setSubmissionHistory([]);
     setHistoryOpen(false);
@@ -406,10 +406,7 @@ export function App() {
         if (!isCurrent) return;
         const nextCode = detail.saved_solution?.code ?? detail.starter_code;
         setProblem(detail);
-        setCode(nextCode);
-        setSolutionSavedAt(detail.saved_solution?.updated_at ?? undefined);
-        setSolutionDirty(false);
-        draftRef.current = { taskId: detail.task_id, code: nextCode, dirty: false };
+        resetSolutionDraft(detail.task_id, nextCode, detail.saved_solution?.updated_at ?? undefined);
         const nextCases = customCasesFromExamples(detail.input_output);
         setCustomCases(nextCases);
         setSelectedCaseId(nextCases[0]?.id ?? "case-1");
@@ -424,26 +421,7 @@ export function App() {
     return () => {
       isCurrent = false;
     };
-  }, [selectedTaskId]);
-
-  useEffect(() => {
-    if (!selectedTaskId) {
-      setCoachMessages([]);
-      return;
-    }
-    let isCurrent = true;
-    fetchAgentThread(selectedTaskId)
-      .then((thread) => {
-        if (isCurrent) setCoachMessages(thread.messages ?? []);
-      })
-      .catch((err: Error) => {
-        if (isCurrent) setError(err.message);
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [selectedTaskId]);
+  }, [clearSolutionDraft, resetSolutionDraft, selectedTaskId]);
 
   useEffect(() => {
     if (!selectedTaskId) {
@@ -460,10 +438,6 @@ export function App() {
     review: progressSummary?.needs_review ?? 0
   }), [progressSummary]);
 
-  const agentCommandsByName = useMemo(() => (
-    new Map(agentCommands.map((command) => [command.name, command]))
-  ), [agentCommands]);
-
   const coachCommandActions = useMemo(() => (
     agentCommands.length
       ? agentCommands
@@ -472,112 +446,32 @@ export function App() {
         .map((command) => ({
           command: command.name,
           label: command.display_name ?? command.name,
-          icon: toolbarIcon(command.toolbar_icon)
+          icon: toolbarIcon(command.toolbar_icon),
+          defaultMessage: command.default_message
         }))
       : FALLBACK_COACH_COMMANDS.map((action) => ({ ...action }))
   ), [agentCommands]);
 
-  useEffect(() => {
-    function onResize() {
-      setCompactLayout(window.innerWidth < 1240);
-    }
-
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-
-  const persistSolution = useCallback((taskId: string, nextCode: string, options?: { showError?: boolean; showSaving?: boolean }) => {
-    const saveTask = saveQueueRef.current
-      .catch(() => undefined)
-      .then(async () => {
-        if (options?.showSaving) setSavingSolution(true);
-        try {
-          const saved = await saveSolution(taskId, nextCode);
-          if (draftRef.current.taskId === taskId && draftRef.current.code === nextCode) {
-            draftRef.current.dirty = false;
-            setSolutionSavedAt(saved.updated_at);
-            setSolutionDirty(false);
-          }
-          return saved;
-        } catch (err) {
-          if (options?.showError) setError((err as Error).message);
-          throw err;
-        } finally {
-          if (options?.showSaving) setSavingSolution(false);
-        }
-      });
-
-    saveQueueRef.current = saveTask.catch(() => undefined);
-    return saveTask;
-  }, []);
-
-  const handleCodeChange = useCallback((nextCode: string) => {
-    setCode(nextCode);
-    if (!problem) return;
-    draftRef.current = { taskId: problem.task_id, code: nextCode, dirty: true };
-    setSolutionDirty(true);
-  }, [problem]);
-
-  const handleSaveSolution = useCallback(async () => {
-    if (!problem || isSavingSolution) return;
-    setError(undefined);
-    try {
-      await persistSolution(problem.task_id, code, { showError: true, showSaving: true });
-    } catch (err) {
-      setError((err as Error).message);
-    }
-  }, [code, isSavingSolution, persistSolution, problem]);
-
-  useEffect(() => {
-    if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
-    if (!problem || !solutionDirty) return;
-
-    const taskId = problem.task_id;
-    const nextCode = code;
-    autoSaveTimerRef.current = window.setTimeout(() => {
-      void persistSolution(taskId, nextCode).catch(() => undefined);
-    }, AUTO_SAVE_DELAY_MS);
-
-    return () => {
-      if (autoSaveTimerRef.current) window.clearTimeout(autoSaveTimerRef.current);
-    };
-  }, [code, persistSolution, problem, solutionDirty]);
-
-  useEffect(() => {
-    function saveLatestDraft() {
-      const draft = draftRef.current;
-      if (!draft.taskId || !draft.dirty) return;
-      void fetch(`/api/problems/${draft.taskId}/solution`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ code: draft.code }),
-        keepalive: true
-      }).catch(() => undefined);
-    }
-
-    window.addEventListener("pagehide", saveLatestDraft);
-    window.addEventListener("beforeunload", saveLatestDraft);
-    return () => {
-      window.removeEventListener("pagehide", saveLatestDraft);
-      window.removeEventListener("beforeunload", saveLatestDraft);
-    };
-  }, []);
-
-  const saveDirtyDraftNow = useCallback(async () => {
-    const draft = draftRef.current;
-    if (!draft.taskId || !draft.dirty) return;
-    await persistSolution(draft.taskId, draft.code).catch(() => undefined);
-  }, [persistSolution]);
-
-  const handleProblemSelect = useCallback(async (taskId: string) => {
+  const handleProblemSelect = useCallback(async (taskId: string, historyMode: "push" | "replace" | "none" = "push") => {
     if (taskId === selectedTaskId) {
       setProblemDrawerOpen(false);
       return;
     }
     await saveDirtyDraftNow();
-    setSelectedTaskId(taskId);
+    setSelectedTaskId(taskId, historyMode);
     setProblemDrawerOpen(false);
-  }, [saveDirtyDraftNow, selectedTaskId]);
+  }, [saveDirtyDraftNow, selectedTaskId, setSelectedTaskId]);
+
+  useEffect(() => {
+    function handlePopState() {
+      const taskId = problemTaskIdFromPath(window.location.pathname);
+      if (!taskId || taskId === selectedTaskId) return;
+      void handleProblemSelect(taskId, "none");
+    }
+
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [handleProblemSelect, selectedTaskId]);
 
   const handleNextPractice = useCallback(async () => {
     const nextTaskId = practiceQueue?.next_task_id;
@@ -591,11 +485,9 @@ export function App() {
     setError(undefined);
     try {
       const response = await submitCode(problem.task_id, code);
-      draftRef.current = { taskId: problem.task_id, code, dirty: false };
       setResult(response);
       setHistoryOpen(false);
-      setSolutionSavedAt(new Date().toISOString());
-      setSolutionDirty(false);
+      markDraftSaved(problem.task_id, code, new Date().toISOString());
       fetchSubmissionHistory(problem.task_id)
         .then(setSubmissionHistory)
         .catch(() => undefined);
@@ -604,7 +496,7 @@ export function App() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [code, isRunning, isSubmitting, problem]);
+  }, [code, isRunning, isSubmitting, markDraftSaved, problem]);
 
   const handleRun = useCallback(async () => {
     if (!problem || isRunning || isSubmitting) return;
@@ -671,12 +563,6 @@ export function App() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape" && coachAbortRef.current) {
-        event.preventDefault();
-        coachAbortRef.current.abort();
-        return;
-      }
-
       const target = event.target as HTMLElement | null;
       const isCoachInput = Boolean(target?.closest(".coach-panel"));
       const isNotesInput = Boolean(target?.closest(".notes-panel"));
@@ -705,147 +591,20 @@ export function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [handleRun, handleSaveSolution, handleSubmit]);
 
-  function startStreamingCoachTurn(userContent: string) {
-    const now = Date.now();
-    const userId = -now;
-    const assistantId = -(now + 1);
-    const createdAt = new Date().toISOString();
-    const userMessage: AgentThreadMessage = {
-      id: userId,
-      role: "user",
-      content: userContent,
-      created_at: createdAt
-    };
-    const assistantMessage: AgentThreadMessage = {
-      id: assistantId,
-      role: "assistant",
-      content: "",
-      created_at: createdAt
-    };
-    setCoachMessages((items) => [...items, userMessage, assistantMessage]);
-    return { userId, assistantId };
-  }
-
-  function appendCoachChunk(assistantId: number, chunk: string) {
-    setCoachMessages((items) => (
-      items.map((item) => (
-        item.id === assistantId ? { ...item, content: item.content + chunk } : item
-      ))
-    ));
-  }
-
-  function removeStreamingCoachTurn(userId: number, assistantId: number) {
-    setCoachMessages((items) => items.filter((item) => item.id !== userId && item.id !== assistantId));
-  }
-
-  function markCoachStopped(assistantId: number) {
-    setCoachMessages((items) => (
-      items.map((item) => {
-        if (item.id !== assistantId) return item;
-        return { ...item, content: item.content ? `${item.content}\n\n（已停止）` : "已停止。" };
-      })
-    ));
-  }
-
-  function isAbortError(err: unknown) {
-    return err instanceof DOMException && err.name === "AbortError";
-  }
-
-  async function runAgentCommand(command: string, options?: { message?: string; includeCode?: boolean; includeResult?: boolean }) {
-    if (!problem) return;
-    const commandInfo = agentCommandsByName.get(command);
-    const message = options?.message ?? (command === "/search-problems" ? commandInfo?.default_message ?? "有哪些经典题和同类练习？" : undefined);
-    const userContent = message ?? commandInfo?.default_message ?? command;
-    setCoachLoading(true);
-    setError(undefined);
-    setAgentPreview(null);
-    const { userId, assistantId } = startStreamingCoachTurn(userContent);
-    const controller = new AbortController();
-    coachAbortRef.current = controller;
-    try {
-      await streamAgentCommand(
-        {
-          task_id: problem.task_id,
-          command,
-          message,
-          code: options?.includeCode ? code : undefined,
-          submission_id: options?.includeResult ? result?.id ?? undefined : undefined,
-          current_result: options?.includeResult && result?.task_id === problem.task_id ? result : undefined,
-          thinking_mode: thinkingMode
-        },
-        (chunk) => appendCoachChunk(assistantId, chunk),
-        controller.signal
-      );
-      const thread = await fetchAgentThread(problem.task_id);
-      setCoachMessages(thread.messages);
-      if (command === "/search-problems") {
-        const response = await fetchLatestRecommendationSet(problem.task_id);
-        setActiveRecommendationSourceTaskId(problem.task_id);
-        setActiveRecommendationSet(response.recommendation_set);
-      }
-      void refreshAgentMemoryList(problem.task_id);
-    } catch (err) {
-      if (isAbortError(err)) {
-        markCoachStopped(assistantId);
-      } else {
-        setError((err as Error).message);
-        removeStreamingCoachTurn(userId, assistantId);
-      }
-    } finally {
-      if (coachAbortRef.current === controller) coachAbortRef.current = null;
-      setCoachLoading(false);
-    }
-  }
-
   function handleCoachCommand(command: string) {
-    if (command === "/diagnose") {
-      void runAgentCommand(command, { includeCode: true, includeResult: true });
-      return;
-    }
-    if (command === "/search-problems") {
-      void runAgentCommand(command, { includeCode: true, includeResult: true });
-      return;
-    }
-    void runAgentCommand(command);
-  }
-
-  async function handleCoachSend(message: string) {
-    if (!problem) return;
-    setCoachLoading(true);
     setError(undefined);
     setAgentPreview(null);
-    const { userId, assistantId } = startStreamingCoachTurn(message);
-    const controller = new AbortController();
-    coachAbortRef.current = controller;
-    try {
-      await streamAgentCommand(
-        {
-          task_id: problem.task_id,
-          command: "auto",
-          message,
-          code,
-          submission_id: result?.id ?? undefined,
-          current_result: result?.task_id === problem.task_id ? result : undefined,
-          thinking_mode: thinkingMode
-        },
-        (chunk) => appendCoachChunk(assistantId, chunk),
-        controller.signal
-      );
-      const thread = await fetchAgentThread(problem.task_id);
-      setCoachMessages(thread.messages);
-      void refreshAgentMemoryList(problem.task_id);
-    } catch (err) {
-      if (isAbortError(err)) {
-        markCoachStopped(assistantId);
-      } else {
-        setError((err as Error).message);
-        removeStreamingCoachTurn(userId, assistantId);
-      }
-    } finally {
-      if (coachAbortRef.current === controller) coachAbortRef.current = null;
-      setCoachLoading(false);
-    }
+    setLearningTab("coach");
+    setQueuedCoachCommand({ id: Date.now(), command });
   }
+
+  const handleCoachRunComplete = useCallback((command: string) => {
+    if (!problem) return;
+    void refreshAgentMemoryList(problem.task_id);
+    if (command === "/search-problems") {
+      refreshRecommendationForTask(problem.task_id);
+    }
+  }, [problem, refreshAgentMemoryList, refreshRecommendationForTask]);
 
   async function handlePreviewAgentContext(message?: string) {
     if (!problem) return;
@@ -867,18 +626,6 @@ export function App() {
       setError((err as Error).message);
     } finally {
       setAgentPreviewLoading(false);
-    }
-  }
-
-  async function handleCoachClear() {
-    if (!problem) return;
-    setError(undefined);
-    try {
-      await clearAgentThread(problem.task_id);
-      setCoachMessages([]);
-      setAgentPreview(null);
-    } catch (err) {
-      setError((err as Error).message);
     }
   }
 
@@ -1014,11 +761,21 @@ export function App() {
             <ProblemList
               problems={problems}
               problemTags={problemTags}
+              studyPlans={studyPlans}
+              activeStudyPlanSlug={activeStudyPlanSlug}
+              activeStudyPlanGroupSlug={activeStudyPlanGroupSlug}
+              activeStudyPlanItems={activeStudyPlanItems}
               practiceQueue={practiceQueue}
               practiceInsights={practiceInsights}
               selectedTaskId={selectedTaskId}
               filters={filters}
               onFiltersChange={setFilters}
+              onStudyPlanChange={(slug) => {
+                setActiveStudyPlanSlug(slug);
+                setActiveStudyPlanGroupSlug(undefined);
+                setActiveStudyPlanItems(undefined);
+              }}
+              onStudyPlanGroupChange={setActiveStudyPlanGroupSlug}
               onSelect={(taskId) => void handleProblemSelect(taskId)}
               onNextPractice={() => void handleNextPractice()}
               onClose={() => setProblemDrawerOpen(false)}
@@ -1095,6 +852,7 @@ export function App() {
                 <div className="pane-content">
                   <EditorPanel
                     code={code}
+                    problemTaskId={problem?.task_id}
                     isSavingSolution={isSavingSolution}
                     solutionDirty={solutionDirty}
                     solutionSavedAt={solutionSavedAt}
@@ -1165,21 +923,27 @@ export function App() {
 	                  </button>
 	                </div>
 	                <div className="learning-content">
-	                  <div className={`learning-content-pane ${learningTab === "coach" ? "active" : ""}`} aria-hidden={learningTab !== "coach"}>
+                  <div className={`learning-content-pane ${learningTab === "coach" ? "active" : ""}`} aria-hidden={learningTab !== "coach"}>
                     <CoachPanel
-                      messages={coachMessages}
-                      isLoading={isCoachLoading}
+                      taskId={problem?.task_id}
+                      code={code}
+                      submissionId={result?.id ?? undefined}
+                      currentResult={result?.task_id === problem?.task_id ? result : undefined}
+                      problemLinks={problems}
                       commandActions={coachCommandActions}
-                      onCommandAction={handleCoachCommand}
+                      commandRequest={queuedCoachCommand}
+                      onCommandRequestHandled={(id) => {
+                        setQueuedCoachCommand((current) => (current?.id === id ? null : current));
+                      }}
                       onProblemLinkClick={(taskId) => void handleProblemSelect(taskId)}
                       onPreviewContext={handlePreviewAgentContext}
                       onClearPreview={() => setAgentPreview(null)}
-                      onSend={handleCoachSend}
-                      onClear={handleCoachClear}
                       contextPreview={agentPreview}
                       isPreviewLoading={isAgentPreviewLoading}
                       thinkingMode={thinkingMode}
                       onThinkingModeChange={setThinkingMode}
+                      onRunComplete={handleCoachRunComplete}
+                      onError={setError}
                     />
                   </div>
                   <div className={`learning-content-pane ${learningTab === "notes" ? "active" : ""}`} aria-hidden={learningTab !== "notes"}>

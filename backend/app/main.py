@@ -32,6 +32,7 @@ from .schemas import (
     TopicMemoryListResponse,
 )
 from .semantic_tests import custom_compare_mode_for_problem, effective_test_code_for_problem
+from .study_plan_routes import create_study_plan_router
 
 app = FastAPI(title="LeetCoach Local API")
 
@@ -383,6 +384,13 @@ def _format_ms(value: int) -> str:
 
 app.include_router(
     create_problem_practice_router(
+        user_id=DEFAULT_USER_ID,
+        connection_factory=get_connection,
+    )
+)
+
+app.include_router(
+    create_study_plan_router(
         user_id=DEFAULT_USER_ID,
         connection_factory=get_connection,
     )

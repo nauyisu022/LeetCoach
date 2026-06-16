@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from app.agent_api import AgentApiService, agent_request_from_coach_chat_request, agent_request_from_coach_request
+from app.agent_api import AgentApiService
 from app.agent_runtime.commands import command_manifest
 from app.agent_runtime.context import build_agent_context
 from app.agent_runtime.hooks import AfterCoachResponseEvent, HookResult, run_after_coach_response_hooks
@@ -31,6 +31,7 @@ from app.agent_runtime.runtime import (
 from app.agent_runtime.service import (
     AI_EMPTY_RESPONSE_TEXT,
     AgentStreamTurn,
+    link_problem_references_as_markdown_urls,
     stream_agent_invocation,
     stream_agent_turn,
     stream_ai_text,
@@ -53,7 +54,7 @@ from app.agent_runtime.tools import (
 )
 from app.agent_runtime.turn import AgentTurnInput
 from app.db import get_connection, init_db
-from app.schemas import AgentCommandRequest, CoachChatRequest, CoachCurrentResult, CoachRequest
+from app.schemas import AgentCommandRequest, CoachCurrentResult
 
 
 EXPECTED_DEFAULT_TOOL_NAMES = [
@@ -161,7 +162,11 @@ def test_problem_search_tool_uses_local_catalog(tmp_path, monkeypatch):
     assert "house-robber-iii" not in task_ids
     assert result.payload["interpreted_topics"].count("树") == 1
     assert result.payload["interpreted_topics"].count("动态规划") == 1
+    house_robber = next(item for item in result.payload["results"] if item["task_id"] == "house-robber")
+    assert house_robber["url"] == "/problems/house-robber"
+    assert house_robber["markdown_link"] == "[198. 打家劫舍](/problems/house-robber)"
     assert "打家劫舍" in result.as_prompt_section()
+    assert "[198. 打家劫舍](/problems/house-robber)" in result.as_prompt_section()
     conn.close()
 
 
@@ -1176,6 +1181,70 @@ def test_stream_agent_invocation_persists_turn_from_runtime_plan(tmp_path, monke
     assert submission["ai_diagnosis_summary"] == "adapter answer"
 
 
+def test_link_problem_references_as_markdown_urls_uses_search_results():
+    text = "1. 46. 全排列 (Medium) —— 基础排列。\n2. 78. 子集 (Medium) —— 子集模板。"
+    linked = link_problem_references_as_markdown_urls(
+        text,
+        [
+            {
+                "question_id": 46,
+                "title": "全排列",
+                "task_id": "permutations",
+                "url": "/tool/permutations",
+                "markdown_link": "[46. 全排列](/tool/permutations)",
+            },
+            {
+                "question_id": 78,
+                "title": "子集",
+                "task_id": "subsets",
+                "url": "/tool/subsets",
+                "markdown_link": "[78. 子集](/tool/subsets)",
+            },
+        ],
+    )
+
+    assert "[46. 全排列](/tool/permutations)" in linked
+    assert "[78. 子集](/tool/subsets)" in linked
+    assert "[1.](" not in linked
+
+
+def test_search_invocation_persists_markdown_problem_urls(tmp_path, monkeypatch):
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
+    conn = get_connection(db_path)
+    init_db(conn)
+    with conn:
+        _insert_problem(conn, "permutations", question_id=46, title_zh="全排列", tags_json='["Backtracking"]')
+        _insert_problem(conn, "subsets", question_id=78, title_zh="子集", tags_json='["Backtracking", "Bit Manipulation"]')
+    request = AgentCommandRequest(
+        task_id="permutations",
+        command="/search-problems",
+        message="排列 子集 推荐",
+    )
+    invocation = build_agent_invocation(
+        conn,
+        request=request,
+        user_id="local",
+        problem=_problem_payload("permutations", question_id=46, tags=["Backtracking"]),
+        config=AgentRuntimeConfig(hooks=[]),
+    )
+    conn.close()
+
+    def fake_stream(messages, *, thinking_mode=None):
+        return iter(["推荐顺序：\n1. 78. 子集 (Medium) —— 回溯模板相近。"])
+
+    chunks = list(stream_agent_invocation(invocation, ai_streamer=fake_stream))
+
+    conn = get_connection(db_path)
+    assistant = conn.execute(
+        "SELECT content FROM coach_messages WHERE user_id = 'local' AND task_id = 'permutations' AND role = 'assistant'"
+    ).fetchone()
+    conn.close()
+
+    assert chunks == ["推荐顺序：\n1. [78. 子集](/problems/subsets) (Medium) —— 回溯模板相近。"]
+    assert assistant["content"] == chunks[0]
+
+
 def test_stream_note_draft_invocation_does_not_write_coach_thread(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("LEETCOACH_CATALOG_DB_PATH", str(db_path))
@@ -1267,7 +1336,7 @@ def test_agent_api_service_wraps_runtime_with_injected_dependencies(tmp_path, mo
     assert message_count == 0
 
 
-def test_agent_api_converts_legacy_coach_requests_without_dropping_context():
+def test_agent_command_request_preserves_assistant_context_fields():
     current_result = CoachCurrentResult(
         task_id="two-sum",
         mode="run",
@@ -1277,27 +1346,25 @@ def test_agent_api_converts_legacy_coach_requests_without_dropping_context():
         failed_assertion="expected [0, 1]",
     )
 
-    command_request = agent_request_from_coach_request(
-        CoachRequest(
-            task_id="two-sum",
-            code="class Solution: pass",
-            submission_id=7,
-            current_result=current_result,
-            thinking_mode="enabled",
-        ),
+    command_request = AgentCommandRequest(
+        task_id="two-sum",
         command="/diagnose",
+        code="class Solution: pass",
+        submission_id=7,
+        current_result=current_result,
+        thinking_mode="enabled",
     )
-    chat_request = agent_request_from_coach_chat_request(
-        CoachChatRequest(
-            task_id="two-sum",
-            message="哪里错了",
-            code="class Solution: pass",
-            current_result=current_result,
-            thinking_mode="disabled",
-        )
+    chat_request = AgentCommandRequest(
+        task_id="two-sum",
+        command="auto",
+        message="哪里错了",
+        code="class Solution: pass",
+        current_result=current_result,
+        thinking_mode="disabled",
     )
 
     assert command_request.command == "/diagnose"
+    assert command_request.submission_id == 7
     assert command_request.current_result == current_result
     assert command_request.thinking_mode == "enabled"
     assert chat_request.command == "auto"
