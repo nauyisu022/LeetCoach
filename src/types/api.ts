@@ -191,6 +191,7 @@ export type AgentCommandRequest = {
   submission_id?: number;
   current_result?: CoachCurrentResult;
   thinking_mode?: ThinkingMode;
+  html_visual_mode?: HtmlVisualMode;
 };
 
 export type AssistantRunEvent =
@@ -211,6 +212,7 @@ export type AgentCommandPreviewResponse = {
   command: string;
   user_content: string;
   thinking_mode: ThinkingMode | null;
+  html_visual_mode: HtmlVisualMode | null;
   current_topics: string[];
   history_count: number;
   memory_count: number;
@@ -344,6 +346,7 @@ export type AgentThreadResponse = {
 };
 
 export type ThinkingMode = "enabled" | "disabled";
+export type HtmlVisualMode = "enabled" | "disabled";
 
 export type AgentMemoryStatus = "proposed" | "accepted" | "rejected" | "archived";
 

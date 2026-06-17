@@ -1,4 +1,4 @@
-import { useComposer, useComposerRuntime, useThread, useThreadRuntime } from "@assistant-ui/react";
+import { ComposerPrimitive, useComposer, useThread, useThreadRuntime } from "@assistant-ui/react";
 import { Send, Square } from "lucide-react";
 import { useEffect } from "react";
 import { createPendingRun } from "./coachRuntimeAdapter";
@@ -15,7 +15,6 @@ export function CoachComposer({
 }) {
   const composerText = useComposer((state) => state.text);
   const isRunning = useThread((state) => state.isRunning);
-  const composerRuntime = useComposerRuntime();
   const threadRuntime = useThreadRuntime();
 
   useEffect(() => {
@@ -29,28 +28,27 @@ export function CoachComposer({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [isRunning, threadRuntime]);
 
-  function sendDraft() {
+  function prepareSend() {
     const text = composerText.trim();
-    if (isRunning || !text) return;
+    if (isRunning || !context.taskId || !text) return false;
     pendingRunRef.current = createPendingRun("auto", text);
     onClearPreview();
-    composerRuntime.send();
+    return true;
   }
 
   return (
-    <div className="coach-input-row">
-      <textarea
+    <ComposerPrimitive.Root
+      className="coach-input-row"
+      onSubmit={(event) => {
+        if (!prepareSend()) event.preventDefault();
+      }}
+    >
+      <ComposerPrimitive.Input
         aria-label="向 AI 教练提问"
         placeholder="问 AI，例如：这题怎么想到哈希表？"
-        value={composerText}
-        rows={1}
-        onChange={(event) => composerRuntime.setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            sendDraft();
-          }
-        }}
+        minRows={1}
+        maxRows={5}
+        submitMode="enter"
       />
       {isRunning ? (
         <button className="send-button stop-button" type="button" onClick={() => threadRuntime.cancelRun()} aria-label="停止回答" title="停止回答">
@@ -58,11 +56,19 @@ export function CoachComposer({
           <span>停止</span>
         </button>
       ) : (
-        <button className="send-button" type="button" onClick={sendDraft} disabled={!context.taskId || !composerText.trim()} aria-label="发送消息" title="发送消息">
+        <ComposerPrimitive.Send
+          className="send-button"
+          onClick={(event) => {
+            if (!prepareSend()) event.preventDefault();
+          }}
+          disabled={!context.taskId || !composerText.trim()}
+          aria-label="发送消息"
+          title="发送消息"
+        >
           <Send size={18} />
           <span>发送</span>
-        </button>
+        </ComposerPrimitive.Send>
       )}
-    </div>
+    </ComposerPrimitive.Root>
   );
 }

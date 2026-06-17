@@ -162,21 +162,6 @@ button:disabled {
   min-height: 0;
 }
 
-.work-layout :where(.sash),
-.editor-layout :where(.sash) {
-  background: transparent;
-}
-
-.work-layout :where(.sash::before),
-.editor-layout :where(.sash::before) {
-  background: rgba(31, 41, 51, 0.08);
-}
-
-.work-layout :where(.sash:hover::before),
-.editor-layout :where(.sash:hover::before) {
-  background: rgba(47, 133, 90, 0.22);
-}
-
 .work-layout {
   min-height: 0;
   flex: 1 1 auto;
@@ -189,11 +174,52 @@ button:disabled {
   overflow: hidden;
 }
 
-.work-layout :where([class*="splitViewView"]),
-.editor-layout :where([class*="splitViewView"]) {
+.work-layout :where([data-panel]),
+.editor-layout :where([data-panel]) {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+.resize-handle {
+  position: relative;
+  flex: 0 0 auto;
+  outline: 0;
+  background: transparent;
+}
+
+.resize-handle[aria-orientation="vertical"] {
+  width: 10px;
+  cursor: col-resize;
+}
+
+.resize-handle[aria-orientation="horizontal"] {
+  height: 10px;
+  cursor: row-resize;
+}
+
+.resize-handle::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  background: rgba(31, 41, 51, 0.08);
+}
+
+.resize-handle[aria-orientation="vertical"]::before {
+  width: 1px;
+  height: 100%;
+}
+
+.resize-handle[aria-orientation="horizontal"]::before {
+  width: 100%;
+  height: 1px;
+}
+
+.resize-handle:hover::before,
+.resize-handle[data-state="drag"]::before,
+.resize-handle:focus-visible::before {
+  background: rgba(47, 133, 90, 0.24);
 }
 
 .pane-content {
@@ -230,7 +256,8 @@ button:disabled {
   font-weight: 800;
 }
 
-.learning-tabs button.active {
+.learning-tabs button.active,
+.learning-tabs [data-state="active"] {
   border-color: var(--border);
   background: var(--surface-muted);
   color: var(--text);
@@ -249,7 +276,8 @@ button:disabled {
   min-height: 0;
 }
 
-.learning-content-pane.active {
+.learning-content-pane.active,
+.learning-content-pane[data-state="active"] {
   display: block;
 }
 

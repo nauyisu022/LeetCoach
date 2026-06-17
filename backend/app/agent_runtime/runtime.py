@@ -37,6 +37,21 @@ class CommandPlanInput:
     tool_results: list[ToolResult]
     skill_section: str
     tool_section: str
+    html_visual_mode: str | None
+
+
+HTML_VISUAL_PROMPT_SECTION = """## HTML 可视化输出规范
+
+HTML 可视化模式已开启。普通解释继续使用 Markdown；当流程、对比、状态转移、复杂结构或信息卡片用纯 Markdown 不够清楚时，可以插入一个小型 HTML 可视化片段。
+
+HTML 片段必须满足：
+- 必须用 `<!-- html-render-start -->` 和 `<!-- html-render-end -->` 包裹。
+- 只能输出局部片段，禁止输出 `<!DOCTYPE html>`、`html`、`head`、`body` 或完整页面。
+- 禁止 `script`、`style`、`iframe`、`object`、`embed`、`form`、事件属性和 `javascript:` URL。
+- 样式只能使用内联 `style`，并保持黑白灰为主、强调色克制。
+- 每个片段只表达一个明确的信息单元，不要把整篇回答包进一个 HTML 块。
+- 推荐标签：`div`、`section`、`span`、`p`、`strong`、`small`、`code`、`pre`、`details`、`summary`、`table`、`ul`、`ol`、`li`、`svg`。
+"""
 
 
 @dataclass(frozen=True)
@@ -119,6 +134,7 @@ def build_agent_invocation(
         message=turn.message,
         history=context.history,
         tool_results=context.tool_results,
+        html_visual_mode=turn.html_visual_mode,
         route_handlers=runtime_config.route_handlers,
     )
     return AgentInvocation(
@@ -157,6 +173,7 @@ def build_command_plan(
     message: str | None,
     history: list[dict[str, str]],
     tool_results: list[ToolResult] | None = None,
+    html_visual_mode: str | None = None,
     route_handlers: Mapping[str, CommandPlanHandler] | None = None,
 ) -> AgentCommandPlan:
     resolved_tool_results = tool_results or []
@@ -167,20 +184,24 @@ def build_command_plan(
     if definition:
         handler = handlers.get(definition.route)
         if handler:
-            return handler(
-                CommandPlanInput(
-                    command=command,
-                    definition=definition,
-                    task_id=task_id,
-                    problem=problem,
-                    code=code,
-                    failure=failure,
-                    message=message,
-                    history=history,
-                    tool_results=resolved_tool_results,
-                    skill_section=skill_section,
-                    tool_section=tool_section,
-                )
+            return _with_html_visual_prompt(
+                handler(
+                    CommandPlanInput(
+                        command=command,
+                        definition=definition,
+                        task_id=task_id,
+                        problem=problem,
+                        code=code,
+                        failure=failure,
+                        message=message,
+                        history=history,
+                        tool_results=resolved_tool_results,
+                        skill_section=skill_section,
+                        tool_section=tool_section,
+                        html_visual_mode=html_visual_mode,
+                    )
+                ),
+                html_visual_mode,
             )
 
     user_content = message or ""
@@ -188,28 +209,34 @@ def build_command_plan(
         raise ValueError("Chat message is required")
     if tool_section:
         search_skill_section = skill_prompt_section("problem_search")
-        return AgentCommandPlan(
-            command="/search-problems",
+        return _with_html_visual_prompt(
+            AgentCommandPlan(
+                command="/search-problems",
+                user_content=user_content,
+                messages=[
+                    *history,
+                    {
+                        "role": "user",
+                        "content": (
+                            f"{_join_sections(search_skill_section, build_chat_context(problem, code, failure), tool_section)}\n\n"
+                            "用户问题触发了本地题库搜索。请基于工具结果回答，不要编造未搜索到的题目。\n"
+                            f"用户问题：{user_content}"
+                        ),
+                    },
+                ],
+            ),
+            html_visual_mode,
+        )
+    return _with_html_visual_prompt(
+        AgentCommandPlan(
+            command="auto",
             user_content=user_content,
             messages=[
                 *history,
-                {
-                    "role": "user",
-                    "content": (
-                        f"{_join_sections(search_skill_section, build_chat_context(problem, code, failure), tool_section)}\n\n"
-                        "用户问题触发了本地题库搜索。请基于工具结果回答，不要编造未搜索到的题目。\n"
-                        f"用户问题：{user_content}"
-                    ),
-                },
+                {"role": "user", "content": f"{_join_sections(skill_prompt_section('guided_chat'), build_chat_context(problem, code, failure))}\n\n用户问题：{user_content}"},
             ],
-        )
-    return AgentCommandPlan(
-        command="auto",
-        user_content=user_content,
-        messages=[
-            *history,
-            {"role": "user", "content": f"{_join_sections(skill_prompt_section('guided_chat'), build_chat_context(problem, code, failure))}\n\n用户问题：{user_content}"},
-        ],
+        ),
+        html_visual_mode,
     )
 
 
@@ -327,3 +354,17 @@ def _tool_section(tool_results: list[ToolResult]) -> str:
 
 def _join_sections(*sections: str) -> str:
     return "\n\n".join(section for section in sections if section)
+
+
+def _with_html_visual_prompt(plan: AgentCommandPlan, html_visual_mode: str | None) -> AgentCommandPlan:
+    if (html_visual_mode or "").strip().lower() != "enabled":
+        return plan
+
+    messages = [dict(message) for message in plan.messages]
+    for index in range(len(messages) - 1, -1, -1):
+        if messages[index].get("role") == "user":
+            messages[index]["content"] = _join_sections(HTML_VISUAL_PROMPT_SECTION, messages[index].get("content", ""))
+            return AgentCommandPlan(command=plan.command, user_content=plan.user_content, messages=messages)
+
+    messages.append({"role": "user", "content": HTML_VISUAL_PROMPT_SECTION})
+    return AgentCommandPlan(command=plan.command, user_content=plan.user_content, messages=messages)

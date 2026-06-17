@@ -1,52 +1,51 @@
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { fetchAssistantThread } from "../lib/api";
 import { CoachComposer } from "./assistant/CoachComposer";
 import { CoachMessages } from "./assistant/CoachMessages";
 import { CoachToolbar } from "./assistant/CoachToolbar";
 import { useCoachAssistantRuntime } from "./assistant/coachRuntimeAdapter";
+import type { AgentThreadResponse } from "../types/api";
 import type { CoachAssistantThreadProps, LoadedThread, PendingRun } from "./assistant/types";
 
 export type { CoachCommandAction } from "./assistant/types";
 
 export function CoachAssistantThread(props: CoachAssistantThreadProps) {
   const { context, onError } = props;
+  const queryClient = useQueryClient();
   const [loadedThread, setLoadedThread] = useState<LoadedThread | null>(null);
-  const [isThreadLoading, setThreadLoading] = useState(false);
+  const threadQuery = useQuery({
+    queryKey: ["assistantThread", context.taskId],
+    queryFn: () => fetchAssistantThread(context.taskId!),
+    enabled: Boolean(context.taskId),
+    staleTime: Infinity
+  });
 
   useEffect(() => {
     if (!context.taskId) {
       setLoadedThread(null);
-      return;
     }
-    let isCurrent = true;
-    setThreadLoading(true);
-    fetchAssistantThread(context.taskId)
-      .then((thread) => {
-        if (!isCurrent) return;
-        setLoadedThread((current) => ({
-          taskId: context.taskId!,
-          messages: thread.messages ?? [],
-          version: (current && current.taskId === context.taskId ? current.version : 0) + 1
-        }));
-      })
-      .catch((error: Error) => {
-        if (isCurrent) onError(error.message);
-      })
-      .finally(() => {
-        if (isCurrent) setThreadLoading(false);
-      });
+  }, [context.taskId]);
 
-    return () => {
-      isCurrent = false;
-    };
-  }, [context.taskId, onError]);
+  useEffect(() => {
+    if (threadQuery.error) onError(threadQuery.error.message);
+  }, [onError, threadQuery.error]);
+
+  useEffect(() => {
+    if (!context.taskId || !threadQuery.data) return;
+    setLoadedThread((current) => ({
+      taskId: context.taskId!,
+      messages: threadQuery.data.messages ?? [],
+      version: (current && current.taskId === context.taskId ? current.version : 0) + 1
+    }));
+  }, [context.taskId, threadQuery.data]);
 
   if (!context.taskId) {
     return <div className="coach-output"><span>请先选择一道题。</span></div>;
   }
 
-  if (isThreadLoading || !loadedThread || loadedThread.taskId !== context.taskId) {
+  if (threadQuery.isLoading || !loadedThread || loadedThread.taskId !== context.taskId) {
     return (
       <div className="coach-output">
         <span>Loading...</span>
@@ -60,6 +59,10 @@ export function CoachAssistantThread(props: CoachAssistantThreadProps) {
       {...props}
       initialMessages={loadedThread.messages}
       onThreadReset={(messages) => {
+        queryClient.setQueryData<AgentThreadResponse | undefined>(
+          ["assistantThread", context.taskId],
+          (current) => current ? { ...current, messages } : current
+        );
         setLoadedThread((current) => ({
           taskId: context.taskId!,
           messages,
@@ -83,6 +86,7 @@ function CoachAssistantRuntime({
   contextPreview,
   isPreviewLoading,
   onThinkingModeChange,
+  onHtmlVisualModeChange,
   onRunComplete,
   onError,
   onThreadReset
@@ -113,6 +117,7 @@ function CoachAssistantRuntime({
         onPreviewContext={onPreviewContext}
         onClearPreview={onClearPreview}
         onThinkingModeChange={onThinkingModeChange}
+        onHtmlVisualModeChange={onHtmlVisualModeChange}
         onError={onError}
         onThreadReset={onThreadReset}
         problemLinks={problemLinks}

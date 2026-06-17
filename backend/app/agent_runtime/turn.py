@@ -14,6 +14,7 @@ class AgentTurnInput:
     submission_id: int | None
     current_result: Any | None
     thinking_mode: str | None
+    html_visual_mode: str | None = None
 
     @classmethod
     def from_command_request(cls, request: Any, *, user_id: str, command: str) -> "AgentTurnInput":
@@ -26,4 +27,5 @@ class AgentTurnInput:
             submission_id=request.submission_id,
             current_result=request.current_result,
             thinking_mode=request.thinking_mode,
+            html_visual_mode=getattr(request, "html_visual_mode", None),
         )

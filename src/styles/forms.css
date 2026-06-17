@@ -111,10 +111,18 @@ select {
   padding: 0 10px;
 }
 
-.thinking-toggle.active {
+.thinking-toggle.active,
+.thinking-toggle[data-state="on"] {
   border-color: var(--primary);
   background: var(--primary-soft);
   color: var(--primary-strong);
+}
+
+.html-visual-toggle.active,
+.html-visual-toggle[data-state="on"] {
+  border-color: #475467;
+  background: #f2f4f7;
+  color: #1f2933;
 }
 
 .thinking-toggle:hover {

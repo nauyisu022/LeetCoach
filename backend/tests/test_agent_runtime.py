@@ -1353,6 +1353,7 @@ def test_agent_command_request_preserves_assistant_context_fields():
         submission_id=7,
         current_result=current_result,
         thinking_mode="enabled",
+        html_visual_mode="enabled",
     )
     chat_request = AgentCommandRequest(
         task_id="two-sum",
@@ -1367,6 +1368,7 @@ def test_agent_command_request_preserves_assistant_context_fields():
     assert command_request.submission_id == 7
     assert command_request.current_result == current_result
     assert command_request.thinking_mode == "enabled"
+    assert command_request.html_visual_mode == "enabled"
     assert chat_request.command == "auto"
     assert chat_request.message == "哪里错了"
     assert chat_request.current_result == current_result
@@ -1942,6 +1944,7 @@ def test_agent_command_preview_returns_invocation_context(tmp_path, monkeypatch)
                 "passed_test_count": 0,
             },
             "thinking_mode": "enabled",
+            "html_visual_mode": "enabled",
         },
     )
 
@@ -1949,6 +1952,7 @@ def test_agent_command_preview_returns_invocation_context(tmp_path, monkeypatch)
     payload = response.json()
     assert payload["command"] == "/diagnose"
     assert payload["thinking_mode"] == "enabled"
+    assert payload["html_visual_mode"] == "enabled"
     assert payload["code_present"] is True
     assert payload["failure_present"] is True
     assert payload["failure"]["source"] == "current_frontend_result"
@@ -1960,6 +1964,8 @@ def test_agent_command_preview_returns_invocation_context(tmp_path, monkeypatch)
     assert all(isinstance(item["ok"], bool) for item in payload["tool_results"])
     assert "expected [0,1], got []" in payload["messages"][-1]["content"]
     assert "只在左侧找 complement" in payload["messages"][-1]["content"]
+    assert "HTML 可视化输出规范" in payload["messages"][-1]["content"]
+    assert "<!-- html-render-start -->" in payload["messages"][-1]["content"]
 
 
 def test_agent_inspection_builds_manifest_and_truncated_preview(tmp_path, monkeypatch):

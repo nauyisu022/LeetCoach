@@ -288,6 +288,7 @@ class AgentCommandRequest(BaseModel):
     submission_id: Optional[int] = None
     current_result: Optional[CoachCurrentResult] = None
     thinking_mode: Optional[str] = None
+    html_visual_mode: Optional[str] = None
 
 
 AssistantRunRequest = AgentCommandRequest
@@ -334,6 +335,7 @@ class AgentCommandPreviewResponse(BaseModel):
     command: str
     user_content: str
     thinking_mode: Optional[str]
+    html_visual_mode: Optional[str] = None
     current_topics: list[str]
     history_count: int
     memory_count: int

@@ -1,11 +1,13 @@
 import { useComposer, useThread, useThreadRuntime } from "@assistant-ui/react";
+import * as ToggleGroup from "@radix-ui/react-toggle-group";
+import * as Tooltip from "@radix-ui/react-tooltip";
 import { FileText, Loader2, MessageSquare, Search, Sparkles, Trash2, X } from "lucide-react";
 import { useCallback, useEffect } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
+import type { ReactNode } from "react";
 import { clearAssistantThread } from "../../lib/api";
-import type { AgentThreadMessage, ThinkingMode } from "../../types/api";
-import { useCoachMarkdownComponents, type CoachProblemLink } from "../CoachMarkdown";
+import type { AgentThreadMessage, HtmlVisualMode, ThinkingMode } from "../../types/api";
+import { CoachRichContent } from "../CoachRichContent";
+import type { CoachProblemLink } from "../CoachMarkdown";
 import { createPendingRun } from "./coachRuntimeAdapter";
 import type { CoachCommandAction, CoachContext, PendingRunRef } from "./types";
 
@@ -27,6 +29,7 @@ export function CoachToolbar({
   onPreviewContext,
   onClearPreview,
   onThinkingModeChange,
+  onHtmlVisualModeChange,
   onError,
   onThreadReset,
   problemLinks
@@ -42,6 +45,7 @@ export function CoachToolbar({
   onPreviewContext: (message?: string) => void;
   onClearPreview: () => void;
   onThinkingModeChange: (mode: ThinkingMode) => void;
+  onHtmlVisualModeChange: (mode: HtmlVisualMode) => void;
   onError: (message: string) => void;
   onThreadReset: (messages: AgentThreadMessage[]) => void;
   problemLinks: CoachProblemLink[];
@@ -50,6 +54,10 @@ export function CoachToolbar({
   const composerText = useComposer((state) => state.text);
   const isRunning = useThread((state) => state.isRunning);
   const messageCount = useThread((state) => state.messages.length);
+  const enabledModes = [
+    ...(context.thinkingMode === "enabled" ? ["thinking"] : []),
+    ...(context.htmlVisualMode === "enabled" ? ["html"] : [])
+  ];
 
   async function clearThread() {
     if (!context.taskId || isRunning || messageCount === 0) return;
@@ -82,42 +90,71 @@ export function CoachToolbar({
   return (
     <>
       <div className="coach-actions">
-        <div className="section-title">
-          <Sparkles size={16} />
-          AI 教练对话
+        <div className="coach-actions-header">
+          <div className="section-title">
+            <Sparkles size={16} />
+            AI 教练对话
+          </div>
+          <CoachTooltip label="清空对话">
+            <button className="icon-button coach-tool-button" onClick={() => void clearThread()} disabled={isRunning || messageCount === 0} aria-label="清空对话">
+              <Trash2 size={15} />
+            </button>
+          </CoachTooltip>
         </div>
-        {commandActions.map((action) => (
+
+        <ToggleGroup.Root
+          className="coach-mode-row"
+          type="multiple"
+          value={enabledModes}
+          onValueChange={(values) => {
+            onThinkingModeChange(values.includes("thinking") ? "enabled" : "disabled");
+            onHtmlVisualModeChange(values.includes("html") ? "enabled" : "disabled");
+          }}
+          aria-label="AI 输出模式"
+        >
+          <CoachTooltip label={context.thinkingMode === "enabled" ? "DeepSeek Thinking 已开启" : "DeepSeek Thinking 已关闭"}>
+            <ToggleGroup.Item
+              className={`thinking-toggle ${context.thinkingMode === "enabled" ? "active" : ""}`}
+              value="thinking"
+              aria-label={context.thinkingMode === "enabled" ? "关闭 Thinking" : "开启 Thinking"}
+            >
+              <Sparkles size={15} />
+              {context.thinkingMode === "enabled" ? "Thinking 开" : "Thinking 关"}
+            </ToggleGroup.Item>
+          </CoachTooltip>
+          <CoachTooltip label={context.htmlVisualMode === "enabled" ? "HTML 可视化已开启；请求会自动注入输出规范" : "HTML 可视化已关闭"}>
+            <ToggleGroup.Item
+              className={`thinking-toggle html-visual-toggle ${context.htmlVisualMode === "enabled" ? "active" : ""}`}
+              value="html"
+              aria-label={context.htmlVisualMode === "enabled" ? "关闭 HTML 可视化" : "开启 HTML 可视化"}
+            >
+              <FileText size={15} />
+              {context.htmlVisualMode === "enabled" ? "HTML 开" : "HTML 关"}
+            </ToggleGroup.Item>
+          </CoachTooltip>
+        </ToggleGroup.Root>
+
+        <div className="coach-command-row">
+          {commandActions.map((action) => (
+            <button
+              className="ghost-button"
+              key={action.command}
+              onClick={() => runCommand(action)}
+              disabled={isRunning}
+            >
+              {commandIcon(action.icon)}
+              {action.label}
+            </button>
+          ))}
           <button
             className="ghost-button"
-            key={action.command}
-            onClick={() => runCommand(action)}
-            disabled={isRunning}
+            onClick={() => onPreviewContext(composerText.trim() || undefined)}
+            disabled={isRunning || isPreviewLoading}
           >
-            {commandIcon(action.icon)}
-            {action.label}
+            {isPreviewLoading ? <Loader2 className="spin" size={15} /> : <FileText size={15} />}
+            预览
           </button>
-        ))}
-        <button
-          className="ghost-button"
-          onClick={() => onPreviewContext(composerText.trim() || undefined)}
-          disabled={isRunning || isPreviewLoading}
-        >
-          {isPreviewLoading ? <Loader2 className="spin" size={15} /> : <FileText size={15} />}
-          预览
-        </button>
-        <button className="icon-button coach-tool-button" onClick={() => void clearThread()} disabled={isRunning || messageCount === 0} title="清空对话" aria-label="清空对话">
-          <Trash2 size={15} />
-        </button>
-        <button
-          className={`thinking-toggle ${context.thinkingMode === "enabled" ? "active" : ""}`}
-          type="button"
-          onClick={() => onThinkingModeChange(context.thinkingMode === "enabled" ? "disabled" : "enabled")}
-          aria-pressed={context.thinkingMode === "enabled"}
-          title={context.thinkingMode === "enabled" ? "DeepSeek Thinking 已开启" : "DeepSeek Thinking 已关闭"}
-        >
-          <Sparkles size={15} />
-          {context.thinkingMode === "enabled" ? "Thinking 开" : "Thinking 关"}
-        </button>
+        </div>
       </div>
       {contextPreview && (
         <CoachPreview
@@ -128,6 +165,20 @@ export function CoachToolbar({
         />
       )}
     </>
+  );
+}
+
+function CoachTooltip({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger asChild>{children}</Tooltip.Trigger>
+      <Tooltip.Portal>
+        <Tooltip.Content className="coach-tooltip" side="bottom" sideOffset={6}>
+          {label}
+          <Tooltip.Arrow className="coach-tooltip-arrow" />
+        </Tooltip.Content>
+      </Tooltip.Portal>
+    </Tooltip.Root>
   );
 }
 
@@ -142,7 +193,6 @@ function CoachPreview({
   onProblemLinkClick: (taskId: string) => void;
   problemLinks: CoachProblemLink[];
 }) {
-  const markdownComponents = useCoachMarkdownComponents(onProblemLinkClick, problemLinks);
   return (
     <article className="agent-preview">
       <div className="agent-preview-header">
@@ -152,9 +202,7 @@ function CoachPreview({
         </button>
       </div>
       <div className="markdown-body">
-        <ReactMarkdown components={markdownComponents} remarkPlugins={[remarkGfm]}>
-          {markdown}
-        </ReactMarkdown>
+        <CoachRichContent markdown={markdown} onProblemLinkClick={onProblemLinkClick} problemLinks={problemLinks} />
       </div>
     </article>
   );

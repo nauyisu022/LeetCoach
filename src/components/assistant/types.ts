@@ -1,5 +1,5 @@
 import type { MutableRefObject } from "react";
-import type { AgentThreadMessage, CoachCurrentResult, ProblemSummary, ThinkingMode } from "../../types/api";
+import type { AgentThreadMessage, CoachCurrentResult, HtmlVisualMode, ProblemSummary, ThinkingMode } from "../../types/api";
 
 export type CoachCommandAction = {
   command: string;
@@ -23,6 +23,7 @@ export type CoachContext = {
   submissionId?: number;
   currentResult?: CoachCurrentResult;
   thinkingMode: ThinkingMode;
+  htmlVisualMode: HtmlVisualMode;
 };
 
 export type CoachAssistantThreadProps = {
@@ -37,6 +38,7 @@ export type CoachAssistantThreadProps = {
   contextPreview: string | null;
   isPreviewLoading: boolean;
   onThinkingModeChange: (mode: ThinkingMode) => void;
+  onHtmlVisualModeChange: (mode: HtmlVisualMode) => void;
   onRunComplete: (command: string) => void;
   onError: (message: string) => void;
 };

@@ -53,6 +53,7 @@ class AgentInvocationInspection:
     command: str
     user_content: str
     thinking_mode: str | None
+    html_visual_mode: str | None
     current_topics: list[str]
     history_count: int
     memory_count: int
@@ -116,6 +117,7 @@ def inspect_agent_invocation(
         command=invocation.plan.command,
         user_content=invocation.plan.user_content,
         thinking_mode=invocation.turn.thinking_mode,
+        html_visual_mode=invocation.turn.html_visual_mode,
         current_topics=invocation.context.current_topics,
         history_count=len(invocation.context.history),
         memory_count=len(invocation.context.memories),

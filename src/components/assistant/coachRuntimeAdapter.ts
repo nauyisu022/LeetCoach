@@ -66,7 +66,8 @@ function runPayloadFromContext(context: CoachContext, pending: PendingRun | null
     code: includeCode ? context.code : undefined,
     submission_id: includeResult ? context.submissionId : undefined,
     current_result: includeResult ? context.currentResult : undefined,
-    thinking_mode: context.thinkingMode
+    thinking_mode: context.thinkingMode,
+    html_visual_mode: context.htmlVisualMode
   };
 }
 

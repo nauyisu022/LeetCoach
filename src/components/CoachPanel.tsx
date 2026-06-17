@@ -1,5 +1,5 @@
 import { CoachAssistantThread, type CoachCommandAction } from "./CoachAssistantThread";
-import type { CoachCurrentResult, ProblemSummary, ThinkingMode } from "../types/api";
+import type { CoachCurrentResult, HtmlVisualMode, ProblemSummary, ThinkingMode } from "../types/api";
 
 export type { CoachCommandAction };
 
@@ -19,6 +19,8 @@ type Props = {
   isPreviewLoading: boolean;
   thinkingMode: ThinkingMode;
   onThinkingModeChange: (mode: ThinkingMode) => void;
+  htmlVisualMode: HtmlVisualMode;
+  onHtmlVisualModeChange: (mode: HtmlVisualMode) => void;
   onRunComplete: (command: string) => void;
   onError: (message: string) => void;
 };
@@ -39,13 +41,15 @@ export function CoachPanel({
   isPreviewLoading,
   thinkingMode,
   onThinkingModeChange,
+  htmlVisualMode,
+  onHtmlVisualModeChange,
   onRunComplete,
   onError
 }: Props) {
   return (
     <section className="coach-panel">
       <CoachAssistantThread
-        context={{ taskId, code, submissionId, currentResult, thinkingMode }}
+        context={{ taskId, code, submissionId, currentResult, thinkingMode, htmlVisualMode }}
         problemLinks={problemLinks}
         commandActions={commandActions}
         commandRequest={commandRequest}
@@ -56,6 +60,7 @@ export function CoachPanel({
         contextPreview={contextPreview}
         isPreviewLoading={isPreviewLoading}
         onThinkingModeChange={onThinkingModeChange}
+        onHtmlVisualModeChange={onHtmlVisualModeChange}
         onRunComplete={onRunComplete}
         onError={onError}
       />

@@ -1,9 +1,12 @@
 .coach-actions {
-  flex-wrap: wrap;
-  justify-content: flex-start;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  gap: 10px;
 }
 
 .coach-panel {
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -11,8 +14,53 @@
   overflow: hidden;
 }
 
-.coach-actions {
-  justify-content: flex-start;
+.coach-actions-header,
+.coach-mode-row,
+.coach-command-row {
+  min-width: 0;
+}
+
+.coach-actions-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.coach-mode-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.coach-command-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.coach-mode-row .thinking-toggle,
+.coach-command-row .ghost-button {
+  width: 100%;
+  min-width: 0;
+}
+
+.coach-tooltip {
+  z-index: 80;
+  max-width: 260px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--text);
+  color: var(--surface);
+  padding: 6px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+  box-shadow: 0 8px 24px rgba(31, 41, 51, 0.16);
+}
+
+.coach-tooltip-arrow {
+  fill: var(--text);
 }
 
 .coach-assistant-thread {
@@ -23,8 +71,17 @@
   overflow: hidden;
 }
 
+.coach-scroll-root {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .coach-output {
   flex: 1 1 0;
+  height: 100%;
   width: 100%;
   margin-top: 12px;
   min-height: 0;
@@ -37,6 +94,19 @@
   background: transparent;
   padding: 10px 2px 12px;
   color: var(--text);
+}
+
+.coach-scrollbar {
+  display: flex;
+  width: 8px;
+  touch-action: none;
+  user-select: none;
+}
+
+.coach-scroll-thumb {
+  flex: 1;
+  border-radius: 999px;
+  background: rgba(31, 41, 51, 0.18);
 }
 
 .coach-output > span {
@@ -317,6 +387,44 @@
 
 .markdown-body th {
   background: var(--surface-muted);
+}
+
+.ai-html-fragment {
+  max-width: 100%;
+  margin: 12px 0;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  padding: 10px;
+}
+
+.ai-html-fragment button {
+  font: inherit;
+}
+
+.ai-html-fragment table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.ai-html-fragment th,
+.ai-html-fragment td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.ai-html-fragment svg {
+  max-width: 100%;
+  height: auto;
+}
+
+@container (max-width: 300px) {
+  .coach-mode-row,
+  .coach-command-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .coach-input-row {

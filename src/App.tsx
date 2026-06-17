@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Allotment, setSashSize } from "allotment";
-import "allotment/dist/style.css";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import * as Tabs from "@radix-ui/react-tabs";
+import { Group, Panel, Separator } from "react-resizable-panels";
 import { BookMarked, BookOpen, Brain, Database, PanelLeftOpen } from "lucide-react";
 import { CoachPanel, type CoachCommandAction } from "./components/CoachPanel";
 import { EditorPanel } from "./components/EditorPanel";
@@ -42,37 +43,30 @@ import {
   useSolutionAutosave
 } from "./hooks";
 import type {
-  AgentMemoryItem,
   AgentCommandInfo,
   AgentCommandPreviewResponse,
   CustomTestCase,
   DisplaySubmissionResponse,
   Filters,
-  PracticeInsightsResponse,
   PracticeNote,
   PracticeNoteDraftResponse,
   PracticeNoteResponse,
   PracticeNoteSaveRequest,
-  PracticeQueueResponse,
   ProblemDetail,
-  ProblemTag,
   ProblemSummary,
-  ProgressSummary,
   StudyPlanItemsResponse,
-  StudyPlanSummary,
-  SubmissionHistoryItem,
   SubmissionResponse,
-  ThinkingMode,
-  TopicMemory
+  HtmlVisualMode,
+  ThinkingMode
 } from "./types/api";
-
-setSashSize(10);
 
 const RUN_CASE_CONCURRENCY = 4;
 const FALLBACK_CUSTOM_INPUT = "nums = [2,7,11,15]\ntarget = 9";
 const SELECTED_TASK_STORAGE_KEY = "leetcoach:selected-task-id";
 const AI_THINKING_STORAGE_KEY = "leetcoach:ai-thinking-mode";
+const AI_HTML_VISUAL_STORAGE_KEY = "leetcoach:ai-html-visual-mode";
 const ACTIVE_RECOMMENDATION_SOURCE_STORAGE_KEY = "leetcoach:active-recommendation-source-task-id";
+const EMPTY_PROBLEMS: ProblemSummary[] = [];
 
 const FALLBACK_COACH_COMMANDS: CoachCommandAction[] = [
   { command: "/explain", label: "讲解", icon: "explain", defaultMessage: "讲讲这题的核心思路。" },
@@ -81,6 +75,12 @@ const FALLBACK_COACH_COMMANDS: CoachCommandAction[] = [
 ];
 
 type RunCaseResult = { case: CustomTestCase; response: SubmissionResponse };
+
+function isStudyPlanItemsResponse(
+  value: ProblemSummary[] | StudyPlanItemsResponse | undefined
+): value is StudyPlanItemsResponse {
+  return Boolean(value) && !Array.isArray(value);
+}
 
 function toolbarIcon(value: string | null | undefined): CoachCommandAction["icon"] {
   if (value === "explain" || value === "search" || value === "diagnose") return value;
@@ -184,6 +184,7 @@ function formatAgentPreview(preview: AgentCommandPreviewResponse): string {
     `- 命令：${preview.command}`,
     `- 用户问题：${preview.user_content}`,
     `- Thinking：${preview.thinking_mode ?? "未设置"}`,
+    `- HTML 可视化：${preview.html_visual_mode ?? "disabled"}`,
     `- 主题：${preview.current_topics.join("、") || "无"}`,
     `- 历史消息：${preview.history_count}`,
     `- 已确认记忆：${preview.memory_count}`,
@@ -204,20 +205,10 @@ function safeInline(value: unknown): string {
 }
 
 export function App() {
+  const queryClient = useQueryClient();
   const [filters, setFilters] = useState<Filters>({});
-  const [problems, setProblems] = useState<ProblemSummary[]>([]);
-  const [problemTags, setProblemTags] = useState<ProblemTag[]>([]);
-  const [studyPlans, setStudyPlans] = useState<StudyPlanSummary[]>([]);
   const [activeStudyPlanSlug, setActiveStudyPlanSlug] = useState<string | undefined>();
   const [activeStudyPlanGroupSlug, setActiveStudyPlanGroupSlug] = useState<string | undefined>();
-  const [activeStudyPlanItems, setActiveStudyPlanItems] = useState<StudyPlanItemsResponse>();
-  const [progressSummary, setProgressSummary] = useState<ProgressSummary>();
-  const [practiceQueue, setPracticeQueue] = useState<PracticeQueueResponse>();
-  const [practiceInsights, setPracticeInsights] = useState<PracticeInsightsResponse>();
-  const [practiceNoteResponse, setPracticeNoteResponse] = useState<PracticeNoteResponse>();
-  const [topicMemories, setTopicMemories] = useState<TopicMemory[]>([]);
-  const [agentMemories, setAgentMemories] = useState<AgentMemoryItem[]>([]);
-  const [agentCommands, setAgentCommands] = useState<AgentCommandInfo[]>([]);
   const [error, setError] = useState<string>();
   const { activeRecommendationSet, refreshRecommendationForTask } = useRecommendationRefresh({
     storageKey: ACTIVE_RECOMMENDATION_SOURCE_STORAGE_KEY,
@@ -226,23 +217,19 @@ export function App() {
   const { selectedTaskId, setSelectedTaskId, hasBootstrappedSelectionRef } = useProblemSelection(
     SELECTED_TASK_STORAGE_KEY
   );
-  const [problem, setProblem] = useState<ProblemDetail>();
   const [code, setCode] = useState("");
   const [result, setResult] = useState<DisplaySubmissionResponse>();
-  const [submissionHistory, setSubmissionHistory] = useState<SubmissionHistoryItem[]>([]);
   const [isHistoryOpen, setHistoryOpen] = useState(false);
-  const [isHistoryLoading, setHistoryLoading] = useState(false);
   const [customCases, setCustomCases] = useState<CustomTestCase[]>(() => customCasesFromExamples([]));
   const [selectedCaseId, setSelectedCaseId] = useState("case-1");
   const [thinkingMode, setThinkingMode] = useState<ThinkingMode>(() => (
     window.localStorage.getItem(AI_THINKING_STORAGE_KEY) === "disabled" ? "disabled" : "enabled"
   ));
+  const [htmlVisualMode, setHtmlVisualMode] = useState<HtmlVisualMode>(() => (
+    window.localStorage.getItem(AI_HTML_VISUAL_STORAGE_KEY) === "enabled" ? "enabled" : "disabled"
+  ));
   const [isRunning, setIsRunning] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isNoteLoading, setNoteLoading] = useState(false);
-  const [isSavingNote, setSavingNote] = useState(false);
   const [isDraftingNote, setDraftingNote] = useState(false);
-  const [isMemoryLoading, setMemoryLoading] = useState(false);
   const [updatingMemoryId, setUpdatingMemoryId] = useState<number | null>(null);
   const [isAgentPreviewLoading, setAgentPreviewLoading] = useState(false);
   const [agentPreview, setAgentPreview] = useState<string | null>(null);
@@ -251,6 +238,89 @@ export function App() {
   const [learningTab, setLearningTab] = useState<"coach" | "notes" | "memory">("coach");
   const isCompactLayout = useCompactLayout();
   const testInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const appliedProblemTaskIdRef = useRef<string | null>(null);
+  const problemTagsQuery = useQuery({
+    queryKey: ["problemTags"],
+    queryFn: fetchProblemTags
+  });
+  const studyPlansQuery = useQuery({
+    queryKey: ["studyPlans"],
+    queryFn: fetchStudyPlans
+  });
+  const agentCommandsQuery = useQuery({
+    queryKey: ["agentCommands"],
+    queryFn: fetchAgentCommands,
+    retry: false
+  });
+  const problemListQuery = useQuery<ProblemSummary[] | StudyPlanItemsResponse>({
+    queryKey: ["problemList", filters, activeStudyPlanSlug, activeStudyPlanGroupSlug],
+    queryFn: () => (
+      activeStudyPlanSlug
+        ? fetchStudyPlanItems(activeStudyPlanSlug, filters, activeStudyPlanGroupSlug)
+        : fetchProblems(filters)
+    )
+  });
+  const problemQuery = useQuery({
+    queryKey: ["problem", selectedTaskId],
+    queryFn: () => fetchProblem(selectedTaskId!),
+    enabled: Boolean(selectedTaskId),
+    staleTime: Infinity,
+    refetchOnWindowFocus: false
+  });
+  const progressSummaryQuery = useQuery({
+    queryKey: ["progressSummary"],
+    queryFn: fetchProgressSummary
+  });
+  const practiceQueueQuery = useQuery({
+    queryKey: ["practiceQueue", filters, selectedTaskId],
+    queryFn: () => fetchPracticeQueue(filters, selectedTaskId)
+  });
+  const practiceInsightsQuery = useQuery({
+    queryKey: ["practiceInsights"],
+    queryFn: fetchPracticeInsights
+  });
+  const practiceNoteQuery = useQuery({
+    queryKey: ["practiceNote", selectedTaskId],
+    queryFn: () => fetchPracticeNote(selectedTaskId!),
+    enabled: Boolean(selectedTaskId)
+  });
+  const topicMemoriesQuery = useQuery({
+    queryKey: ["topicMemories"],
+    queryFn: fetchTopicMemories
+  });
+  const agentMemoriesQuery = useQuery({
+    queryKey: ["agentMemories", selectedTaskId],
+    queryFn: () => fetchAgentMemories(undefined, selectedTaskId),
+    enabled: Boolean(selectedTaskId)
+  });
+  const submissionHistoryQuery = useQuery({
+    queryKey: ["submissionHistory", problemQuery.data?.task_id],
+    queryFn: () => fetchSubmissionHistory(problemQuery.data!.task_id),
+    enabled: Boolean(problemQuery.data && isHistoryOpen)
+  });
+  const problemListData = problemListQuery.data;
+  const activeStudyPlanItems = isStudyPlanItemsResponse(problemListData) ? problemListData : undefined;
+  const problems = useMemo(() => {
+    if (!problemListData) return EMPTY_PROBLEMS;
+    return Array.isArray(problemListData) ? problemListData : problemListData.items;
+  }, [problemListData]);
+  const problem = problemQuery.data;
+  const problemTags = problemTagsQuery.data ?? [];
+  const studyPlans = studyPlansQuery.data?.plans ?? [];
+  const progressSummary = progressSummaryQuery.data;
+  const practiceQueue = practiceQueueQuery.data;
+  const practiceInsights = practiceInsightsQuery.data;
+  const practiceNoteResponse = practiceNoteQuery.data;
+  const topicMemories = topicMemoriesQuery.data?.memories ?? [];
+  const agentCommands: AgentCommandInfo[] = useMemo(
+    () => agentCommandsQuery.data?.commands ?? [],
+    [agentCommandsQuery.data]
+  );
+  const agentMemories = selectedTaskId ? agentMemoriesQuery.data?.memories ?? [] : [];
+  const isMemoryLoading = agentMemoriesQuery.isFetching;
+  const submissionHistory = isHistoryOpen ? submissionHistoryQuery.data ?? [] : [];
+  const isHistoryLoading = isHistoryOpen && submissionHistoryQuery.isFetching;
+  const isNoteLoading = practiceNoteQuery.isFetching || topicMemoriesQuery.isFetching;
   const {
     isSavingSolution,
     solutionDirty,
@@ -268,84 +338,103 @@ export function App() {
     onError: setError
   });
 
-  const refreshAgentMemoryList = useCallback(async (taskId: string, options?: { showLoading?: boolean }) => {
-    if (options?.showLoading) setMemoryLoading(true);
-    try {
-      const response = await fetchAgentMemories(undefined, taskId);
-      setAgentMemories(response.memories);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      if (options?.showLoading) setMemoryLoading(false);
+  const queryError = problemTagsQuery.error
+    ?? studyPlansQuery.error
+    ?? problemListQuery.error
+    ?? problemQuery.error
+    ?? progressSummaryQuery.error
+    ?? practiceQueueQuery.error
+    ?? practiceInsightsQuery.error
+    ?? practiceNoteQuery.error
+    ?? topicMemoriesQuery.error
+    ?? submissionHistoryQuery.error
+    ?? agentMemoriesQuery.error;
+
+  const submitMutation = useMutation({
+    mutationFn: ({ taskId, solutionCode }: { taskId: string; solutionCode: string }) => (
+      submitCode(taskId, solutionCode)
+    ),
+    onSuccess: (response, variables) => {
+      setResult(response);
+      setHistoryOpen(false);
+      markDraftSaved(variables.taskId, variables.solutionCode, new Date().toISOString());
+      void queryClient.invalidateQueries({ queryKey: ["submissionHistory", variables.taskId] });
     }
-  }, []);
+  });
+  const isSubmitting = submitMutation.isPending;
+
+  const savePracticeNoteMutation = useMutation({
+    mutationFn: ({
+      taskId,
+      payload
+    }: {
+      taskId: string;
+      payload: PracticeNoteSaveRequest;
+      fallbackTopics: string[];
+    }) => savePracticeNote(taskId, payload),
+    onSuccess: (saved, variables) => {
+      queryClient.setQueryData<PracticeNoteResponse>(
+        ["practiceNote", variables.taskId],
+        (current) => ({
+          note: saved,
+          suggested_topics: saved.topics.length ? saved.topics : current?.suggested_topics ?? variables.fallbackTopics
+        })
+      );
+      void queryClient.invalidateQueries({ queryKey: ["topicMemories"] });
+    }
+  });
+  const isSavingNote = savePracticeNoteMutation.isPending;
+
+  const reviewPracticeNoteMutation = useMutation({
+    mutationFn: ({ taskId, rating }: { taskId: string; rating: number }) => reviewPracticeNote(taskId, rating),
+    onSuccess: (_response, variables) => {
+      void queryClient.invalidateQueries({ queryKey: ["practiceNote", variables.taskId] });
+      void queryClient.invalidateQueries({ queryKey: ["practiceInsights"] });
+    }
+  });
+
+  const memoryMutation = useMutation({
+    mutationFn: async ({
+      memoryId,
+      action,
+      content
+    }: {
+      memoryId: number;
+      taskId: string;
+      action: "accept" | "reject" | "archive" | "save";
+      content?: string;
+    }) => {
+      if (action === "accept") return acceptAgentMemory(memoryId);
+      if (action === "reject") return rejectAgentMemory(memoryId);
+      if (action === "archive") return updateAgentMemory(memoryId, { status: "archived" });
+      return updateAgentMemory(memoryId, { content: content ?? "" });
+    },
+    onMutate: (variables) => {
+      setUpdatingMemoryId(variables.memoryId);
+    },
+    onSuccess: (_response, variables) => {
+      void refreshAgentMemoryList(variables.taskId);
+    },
+    onSettled: () => {
+      setUpdatingMemoryId(null);
+    }
+  });
+
+  const refreshAgentMemoryList = useCallback(async (taskId: string) => {
+    await queryClient.invalidateQueries({ queryKey: ["agentMemories", taskId] });
+  }, [queryClient]);
 
   useEffect(() => {
-    let isCurrent = true;
-    const request = activeStudyPlanSlug
-      ? fetchStudyPlanItems(activeStudyPlanSlug, filters, activeStudyPlanGroupSlug)
-      : fetchProblems(filters);
-    request
-      .then((response) => {
-        if (!isCurrent) return;
-        const items = Array.isArray(response) ? response : response.items;
-        setActiveStudyPlanItems(Array.isArray(response) ? undefined : response);
-        setProblems(items);
-        const selectableItems = items.filter((item) => item.available !== false);
-        if (!hasBootstrappedSelectionRef.current && selectableItems.length) {
-          hasBootstrappedSelectionRef.current = true;
-          setSelectedTaskId(selectableItems[0].task_id, "replace");
-        }
-      })
-      .catch((err: Error) => {
-        if (isCurrent) setError(err.message);
-      });
-    return () => {
-      isCurrent = false;
-    };
-  }, [activeStudyPlanGroupSlug, activeStudyPlanSlug, filters, hasBootstrappedSelectionRef, setSelectedTaskId]);
+    const selectableItems = problems.filter((item) => item.available !== false);
+    if (!hasBootstrappedSelectionRef.current && selectableItems.length) {
+      hasBootstrappedSelectionRef.current = true;
+      setSelectedTaskId(selectableItems[0].task_id, "replace");
+    }
+  }, [hasBootstrappedSelectionRef, problems, setSelectedTaskId]);
 
   useEffect(() => {
-    fetchProblemTags()
-      .then(setProblemTags)
-      .catch((err: Error) => setError(err.message));
-  }, []);
-
-  useEffect(() => {
-    fetchStudyPlans()
-      .then((response) => setStudyPlans(response.plans))
-      .catch((err: Error) => setError(err.message));
-  }, []);
-
-  useEffect(() => {
-    let isCurrent = true;
-    fetchAgentCommands()
-      .then((response) => {
-        if (isCurrent) setAgentCommands(response.commands);
-      })
-      .catch(() => {
-        if (isCurrent) setAgentCommands([]);
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, []);
-
-  useEffect(() => {
-    let isCurrent = true;
-    fetchProgressSummary()
-      .then((summary) => {
-        if (isCurrent) setProgressSummary(summary);
-      })
-      .catch((err: Error) => {
-        if (isCurrent) setError(err.message);
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [result]);
+    if (queryError) setError(queryError.message);
+  }, [queryError]);
 
   useEffect(() => {
     setAgentPreview(null);
@@ -356,80 +445,40 @@ export function App() {
   }, [thinkingMode]);
 
   useEffect(() => {
-    fetchPracticeQueue(filters, selectedTaskId)
-      .then(setPracticeQueue)
-      .catch((err: Error) => setError(err.message));
-  }, [filters, result, selectedTaskId]);
+    window.localStorage.setItem(AI_HTML_VISUAL_STORAGE_KEY, htmlVisualMode);
+  }, [htmlVisualMode]);
 
   useEffect(() => {
-    fetchPracticeInsights()
-      .then(setPracticeInsights)
-      .catch((err: Error) => setError(err.message));
-  }, [result]);
-
-  useEffect(() => {
-    if (!selectedTaskId) {
-      setPracticeNoteResponse(undefined);
-      setTopicMemories([]);
-      return;
+    if (!result) return;
+    void queryClient.invalidateQueries({ queryKey: ["progressSummary"] });
+    void queryClient.invalidateQueries({ queryKey: ["practiceQueue"] });
+    void queryClient.invalidateQueries({ queryKey: ["practiceInsights"] });
+    if (selectedTaskId) {
+      void queryClient.invalidateQueries({ queryKey: ["practiceNote", selectedTaskId] });
     }
-    let isCurrent = true;
-    setNoteLoading(true);
-    Promise.all([fetchPracticeNote(selectedTaskId), fetchTopicMemories()])
-      .then(([noteResponse, memoriesResponse]) => {
-        if (!isCurrent) return;
-        setPracticeNoteResponse(noteResponse);
-        setTopicMemories(memoriesResponse.memories);
-      })
-      .catch((err: Error) => {
-        if (isCurrent) setError(err.message);
-      })
-      .finally(() => {
-        if (isCurrent) setNoteLoading(false);
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [result, selectedTaskId]);
+    void queryClient.invalidateQueries({ queryKey: ["topicMemories"] });
+  }, [queryClient, result, selectedTaskId]);
 
   useEffect(() => {
-    if (!selectedTaskId) return;
-    let isCurrent = true;
-    setProblem(undefined);
+    appliedProblemTaskIdRef.current = null;
     clearSolutionDraft();
     setResult(undefined);
-    setSubmissionHistory([]);
     setHistoryOpen(false);
-    fetchProblem(selectedTaskId)
-      .then((detail) => {
-        if (!isCurrent) return;
-        const nextCode = detail.saved_solution?.code ?? detail.starter_code;
-        setProblem(detail);
-        resetSolutionDraft(detail.task_id, nextCode, detail.saved_solution?.updated_at ?? undefined);
-        const nextCases = customCasesFromExamples(detail.input_output);
-        setCustomCases(nextCases);
-        setSelectedCaseId(nextCases[0]?.id ?? "case-1");
-        setResult(undefined);
-        setSubmissionHistory([]);
-        setHistoryOpen(false);
-      })
-      .catch((err: Error) => {
-        if (isCurrent) setError(err.message);
-      });
-
-    return () => {
-      isCurrent = false;
-    };
-  }, [clearSolutionDraft, resetSolutionDraft, selectedTaskId]);
+    setCustomCases(customCasesFromExamples([]));
+    setSelectedCaseId("case-1");
+  }, [clearSolutionDraft, selectedTaskId]);
 
   useEffect(() => {
-    if (!selectedTaskId) {
-      setAgentMemories([]);
-      return;
-    }
-    void refreshAgentMemoryList(selectedTaskId, { showLoading: true });
-  }, [refreshAgentMemoryList, selectedTaskId]);
+    if (!problem || appliedProblemTaskIdRef.current === problem.task_id) return;
+    appliedProblemTaskIdRef.current = problem.task_id;
+    const nextCode = problem.saved_solution?.code ?? problem.starter_code;
+    resetSolutionDraft(problem.task_id, nextCode, problem.saved_solution?.updated_at ?? undefined);
+    const nextCases = customCasesFromExamples(problem.input_output);
+    setCustomCases(nextCases);
+    setSelectedCaseId(nextCases[0]?.id ?? "case-1");
+    setResult(undefined);
+    setHistoryOpen(false);
+  }, [problem, resetSolutionDraft]);
 
   const progressStats = useMemo(() => ({
     total: progressSummary?.total ?? 0,
@@ -481,22 +530,13 @@ export function App() {
 
   const handleSubmit = useCallback(async () => {
     if (!problem || isRunning || isSubmitting) return;
-    setIsSubmitting(true);
     setError(undefined);
     try {
-      const response = await submitCode(problem.task_id, code);
-      setResult(response);
-      setHistoryOpen(false);
-      markDraftSaved(problem.task_id, code, new Date().toISOString());
-      fetchSubmissionHistory(problem.task_id)
-        .then(setSubmissionHistory)
-        .catch(() => undefined);
+      await submitMutation.mutateAsync({ taskId: problem.task_id, solutionCode: code });
     } catch (err) {
       setError((err as Error).message);
-    } finally {
-      setIsSubmitting(false);
     }
-  }, [code, isRunning, isSubmitting, markDraftSaved, problem]);
+  }, [code, isRunning, isSubmitting, problem, submitMutation]);
 
   const handleRun = useCallback(async () => {
     if (!problem || isRunning || isSubmitting) return;
@@ -549,16 +589,7 @@ export function App() {
       return;
     }
     setHistoryOpen(true);
-    setHistoryLoading(true);
     setError(undefined);
-    try {
-      const items = await fetchSubmissionHistory(problem.task_id);
-      setSubmissionHistory(items);
-    } catch (err) {
-      setError((err as Error).message);
-    } finally {
-      setHistoryLoading(false);
-    }
   }, [isHistoryOpen, problem]);
 
   useEffect(() => {
@@ -619,7 +650,8 @@ export function App() {
         code,
         submission_id: result?.id ?? undefined,
         current_result: result?.task_id === problem.task_id ? result : undefined,
-        thinking_mode: thinkingMode
+        thinking_mode: thinkingMode,
+        html_visual_mode: htmlVisualMode
       });
       setAgentPreview(formatAgentPreview(preview));
     } catch (err) {
@@ -631,25 +663,18 @@ export function App() {
 
   const handlePracticeNoteSave = useCallback(async (payload: PracticeNoteSaveRequest): Promise<PracticeNote> => {
     if (!problem) throw new Error("No problem selected");
-    setSavingNote(true);
     setError(undefined);
     try {
-      const saved = await savePracticeNote(problem.task_id, payload);
-      setPracticeNoteResponse((current) => ({
-        note: saved,
-        suggested_topics: saved.topics.length ? saved.topics : current?.suggested_topics ?? problem.tags
-      }));
-      fetchTopicMemories()
-        .then((response) => setTopicMemories(response.memories))
-        .catch(() => undefined);
-      return saved;
+      return await savePracticeNoteMutation.mutateAsync({
+        taskId: problem.task_id,
+        payload,
+        fallbackTopics: problem.tags
+      });
     } catch (err) {
       setError((err as Error).message);
       throw err;
-    } finally {
-      setSavingNote(false);
     }
-  }, [problem]);
+  }, [problem, savePracticeNoteMutation]);
 
   const handlePracticeNoteDraft = useCallback(async (onChunk: (chunk: string) => void): Promise<PracticeNoteDraftResponse> => {
     if (!problem) throw new Error("No problem selected");
@@ -676,81 +701,58 @@ export function App() {
     if (!problem) return;
     setError(undefined);
     try {
-      await reviewPracticeNote(problem.task_id, rating);
-      const noteResponse = await fetchPracticeNote(problem.task_id);
-      setPracticeNoteResponse(noteResponse);
-      fetchPracticeInsights()
-        .then(setPracticeInsights)
-        .catch(() => undefined);
+      await reviewPracticeNoteMutation.mutateAsync({ taskId: problem.task_id, rating });
     } catch (err) {
       setError((err as Error).message);
       throw err;
     }
-  }, [problem]);
+  }, [problem, reviewPracticeNoteMutation]);
 
   const handleMemoryAccept = useCallback(async (memoryId: number) => {
     if (!problem) return;
-    setUpdatingMemoryId(memoryId);
     setError(undefined);
     try {
-      await acceptAgentMemory(memoryId);
-      await refreshAgentMemoryList(problem.task_id);
+      await memoryMutation.mutateAsync({ memoryId, taskId: problem.task_id, action: "accept" });
     } catch (err) {
       setError((err as Error).message);
       throw err;
-    } finally {
-      setUpdatingMemoryId(null);
     }
-  }, [problem, refreshAgentMemoryList]);
+  }, [memoryMutation, problem]);
 
   const handleMemoryReject = useCallback(async (memoryId: number) => {
     if (!problem) return;
-    setUpdatingMemoryId(memoryId);
     setError(undefined);
     try {
-      await rejectAgentMemory(memoryId);
-      await refreshAgentMemoryList(problem.task_id);
+      await memoryMutation.mutateAsync({ memoryId, taskId: problem.task_id, action: "reject" });
     } catch (err) {
       setError((err as Error).message);
       throw err;
-    } finally {
-      setUpdatingMemoryId(null);
     }
-  }, [problem, refreshAgentMemoryList]);
+  }, [memoryMutation, problem]);
 
   const handleMemoryArchive = useCallback(async (memoryId: number) => {
     if (!problem) return;
-    setUpdatingMemoryId(memoryId);
     setError(undefined);
     try {
-      await updateAgentMemory(memoryId, { status: "archived" });
-      await refreshAgentMemoryList(problem.task_id);
+      await memoryMutation.mutateAsync({ memoryId, taskId: problem.task_id, action: "archive" });
     } catch (err) {
       setError((err as Error).message);
       throw err;
-    } finally {
-      setUpdatingMemoryId(null);
     }
-  }, [problem, refreshAgentMemoryList]);
+  }, [memoryMutation, problem]);
 
   const handleMemorySave = useCallback(async (memoryId: number, content: string) => {
     if (!problem) return;
-    setUpdatingMemoryId(memoryId);
     setError(undefined);
     try {
-      await updateAgentMemory(memoryId, { content });
-      await refreshAgentMemoryList(problem.task_id);
+      await memoryMutation.mutateAsync({ memoryId, taskId: problem.task_id, action: "save", content });
     } catch (err) {
       setError((err as Error).message);
       throw err;
-    } finally {
-      setUpdatingMemoryId(null);
     }
-  }, [problem, refreshAgentMemoryList]);
+  }, [memoryMutation, problem]);
 
-  const layoutKey = isCompactLayout ? "compact-allotment-v2" : "desktop-allotment-v2";
-  const outerSizes = isCompactLayout ? [120, 460, 140] : [520, 760, 420];
-  const editorSizes = isCompactLayout ? [180, 280] : [470, 310];
+  const layoutKey = isCompactLayout ? "compact-resizable-v1" : "desktop-resizable-v1";
 
   return (
     <div className="app-shell">
@@ -773,7 +775,6 @@ export function App() {
               onStudyPlanChange={(slug) => {
                 setActiveStudyPlanSlug(slug);
                 setActiveStudyPlanGroupSlug(undefined);
-                setActiveStudyPlanItems(undefined);
               }}
               onStudyPlanGroupChange={setActiveStudyPlanGroupSlug}
               onSelect={(taskId) => void handleProblemSelect(taskId)}
@@ -825,30 +826,25 @@ export function App() {
             打开题单开始练习
           </button>
         )}
-        <Allotment
+        <Group
           key={layoutKey}
           id={`main-layout-${layoutKey}`}
           className={`work-layout ${isCompactLayout ? "compact" : ""}`}
-          defaultSizes={outerSizes}
-          minSize={80}
-          proportionalLayout={false}
-          vertical={isCompactLayout}
+          orientation={isCompactLayout ? "vertical" : "horizontal"}
         >
-          <Allotment.Pane minSize={isCompactLayout ? 120 : 360} preferredSize={isCompactLayout ? 150 : 520}>
+          <Panel id="problem" minSize={isCompactLayout ? "80px" : "280px"} defaultSize={isCompactLayout ? "100px" : "340px"}>
             <div className="pane-content">
               <ProblemPanel problem={problem} />
             </div>
-          </Allotment.Pane>
-          <Allotment.Pane minSize={isCompactLayout ? 360 : 640} preferredSize={isCompactLayout ? 460 : 760}>
-            <Allotment
+          </Panel>
+          <Separator className="resize-handle" />
+          <Panel id="workspace" minSize={isCompactLayout ? "260px" : "520px"} defaultSize={isCompactLayout ? "300px" : "600px"}>
+            <Group
               id={`editor-layout-${layoutKey}`}
               className="editor-layout"
-              defaultSizes={editorSizes}
-              minSize={80}
-              proportionalLayout={false}
-              vertical
+              orientation="vertical"
             >
-              <Allotment.Pane minSize={isCompactLayout ? 120 : 320} preferredSize={isCompactLayout ? 180 : 520}>
+              <Panel id="editor" minSize={isCompactLayout ? "90px" : "320px"} defaultSize={isCompactLayout ? "160px" : "520px"}>
                 <div className="pane-content">
                   <EditorPanel
                     code={code}
@@ -859,8 +855,9 @@ export function App() {
                     onCodeChange={handleCodeChange}
                   />
                 </div>
-              </Allotment.Pane>
-              <Allotment.Pane minSize={isCompactLayout ? 220 : 240} preferredSize={isCompactLayout ? 300 : 320}>
+              </Panel>
+              <Separator className="resize-handle" />
+              <Panel id="tests" minSize={isCompactLayout ? "120px" : "240px"} defaultSize={isCompactLayout ? "140px" : "320px"}>
                 <div className="pane-content">
                   <TestDock
                     result={result}
@@ -884,46 +881,33 @@ export function App() {
                     onHistoryToggle={handleHistoryToggle}
                   />
                 </div>
-              </Allotment.Pane>
-            </Allotment>
-          </Allotment.Pane>
-          <Allotment.Pane minSize={isCompactLayout ? 120 : 360} preferredSize={isCompactLayout ? 150 : 420}>
+              </Panel>
+            </Group>
+          </Panel>
+          <Separator className="resize-handle" />
+          <Panel id="learning" minSize={isCompactLayout ? "220px" : "260px"} defaultSize={isCompactLayout ? "260px" : "300px"}>
             <div className="pane-content">
-              <section className="learning-panel">
-                <div className="learning-tabs" role="tablist" aria-label="学习面板">
-                  <button
-                    className={learningTab === "coach" ? "active" : ""}
-                    type="button"
-                    role="tab"
-                    aria-selected={learningTab === "coach"}
-                    onClick={() => setLearningTab("coach")}
-                  >
+              <Tabs.Root
+                className="learning-panel"
+                value={learningTab}
+                onValueChange={(value) => setLearningTab(value as "coach" | "notes" | "memory")}
+              >
+                <Tabs.List className="learning-tabs" aria-label="学习面板">
+                  <Tabs.Trigger value="coach">
                     <Brain size={15} />
                     AI 教练
-                  </button>
-	                  <button
-	                    className={learningTab === "notes" ? "active" : ""}
-	                    type="button"
-	                    role="tab"
-	                    aria-selected={learningTab === "notes"}
-	                    onClick={() => setLearningTab("notes")}
-	                  >
-	                    <BookMarked size={15} />
-	                    Notes
-	                  </button>
-	                  <button
-	                    className={learningTab === "memory" ? "active" : ""}
-	                    type="button"
-	                    role="tab"
-	                    aria-selected={learningTab === "memory"}
-	                    onClick={() => setLearningTab("memory")}
-	                  >
-	                    <Database size={15} />
-	                    Memory
-	                  </button>
-	                </div>
-	                <div className="learning-content">
-                  <div className={`learning-content-pane ${learningTab === "coach" ? "active" : ""}`} aria-hidden={learningTab !== "coach"}>
+                  </Tabs.Trigger>
+                  <Tabs.Trigger value="notes">
+                    <BookMarked size={15} />
+                    Notes
+                  </Tabs.Trigger>
+                  <Tabs.Trigger value="memory">
+                    <Database size={15} />
+                    Memory
+                  </Tabs.Trigger>
+                </Tabs.List>
+                <div className="learning-content">
+                  <Tabs.Content className="learning-content-pane" value="coach" forceMount>
                     <CoachPanel
                       taskId={problem?.task_id}
                       code={code}
@@ -942,11 +926,13 @@ export function App() {
                       isPreviewLoading={isAgentPreviewLoading}
                       thinkingMode={thinkingMode}
                       onThinkingModeChange={setThinkingMode}
+                      htmlVisualMode={htmlVisualMode}
+                      onHtmlVisualModeChange={setHtmlVisualMode}
                       onRunComplete={handleCoachRunComplete}
                       onError={setError}
                     />
-                  </div>
-                  <div className={`learning-content-pane ${learningTab === "notes" ? "active" : ""}`} aria-hidden={learningTab !== "notes"}>
+                  </Tabs.Content>
+                  <Tabs.Content className="learning-content-pane" value="notes" forceMount>
                     <NotesPanel
                       problem={problem}
                       note={practiceNoteResponse?.note}
@@ -957,26 +943,26 @@ export function App() {
                       isDrafting={isDraftingNote}
                       onSave={handlePracticeNoteSave}
                       onDraft={handlePracticeNoteDraft}
-	                      onReview={handlePracticeNoteReview}
-	                    />
-	                  </div>
-	                  <div className={`learning-content-pane ${learningTab === "memory" ? "active" : ""}`} aria-hidden={learningTab !== "memory"}>
-	                    <MemoryPanel
-	                      problem={problem}
-	                      memories={agentMemories}
-	                      isLoading={isMemoryLoading}
-	                      updatingMemoryId={updatingMemoryId}
-	                      onAccept={handleMemoryAccept}
-	                      onReject={handleMemoryReject}
-	                      onArchive={handleMemoryArchive}
-	                      onSave={handleMemorySave}
-	                    />
-	                  </div>
-	                </div>
-              </section>
+                      onReview={handlePracticeNoteReview}
+                    />
+                  </Tabs.Content>
+                  <Tabs.Content className="learning-content-pane" value="memory" forceMount>
+                    <MemoryPanel
+                      problem={problem}
+                      memories={agentMemories}
+                      isLoading={isMemoryLoading}
+                      updatingMemoryId={updatingMemoryId}
+                      onAccept={handleMemoryAccept}
+                      onReject={handleMemoryReject}
+                      onArchive={handleMemoryArchive}
+                      onSave={handleMemorySave}
+                    />
+                  </Tabs.Content>
+                </div>
+              </Tabs.Root>
             </div>
-          </Allotment.Pane>
-        </Allotment>
+          </Panel>
+        </Group>
       </div>
     </div>
   );
